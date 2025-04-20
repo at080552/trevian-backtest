@@ -5,13 +5,13 @@ module MT4Backtester
     class TrevianStrategy
       attr_reader :params, :results, :core_logic
 
-        def initialize(params = {}, debug_mode = false)
+      def initialize(params = {}, debug_mode = false)
         # 環境変数から設定を読み込む
         env_params = MT4Backtester::Config::ConfigLoader.load
-        
+          
         # パラメータをマージ（ユーザー指定のパラメータを優先）
         @params = env_params.merge(params)
-        
+          
         @debug_mode = debug_mode
         @core_logic = Trevian::CoreLogic.new(@params, debug_mode)
         @results = nil
@@ -19,7 +19,7 @@ module MT4Backtester
           balance: @params[:Start_Sikin] || 300,
           equity: @params[:Start_Sikin] || 300,
           margin: 0
-        }
+          }
       end
 
       def run(tick_data)

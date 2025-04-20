@@ -32,24 +32,6 @@ module MT4Backtester
             trailLength: 99
           }
 
-#自分で指定
-require 'bigdecimal'
-params[:Gap] = BigDecimal("103.2")
-params[:Takeprofit] = BigDecimal("185.4")
-params[:Start_Lots] = BigDecimal("0.01")
-params[:Gap_down_Percent] = BigDecimal("0")
-params[:Profit_down_Percent] = BigDecimal("0")
-params[:keisu_x] = BigDecimal("1.3")
-params[:keisu_pulus_pips] = BigDecimal("0.03")
-params[:position_x] = 1
-params[:LosCutPosition] = 5
-params[:LosCutProfit] = -1500000
-params[:LosCutPlus] = -600000
-params[:trailLength] = BigDecimal("10")
-params[:MaxLotX] = BigDecimal("18")
-params[:MinusLot] = BigDecimal("0.02")
-params[:Start_Sikin] = 4500000
-
           # パラメータのマージ（ユーザー指定のパラメータを優先）
           @params = @default_params.merge(params)
           

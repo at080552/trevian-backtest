@@ -121,7 +121,7 @@ end
 # 計算パラメータを表示
 puts "\n===== 計算されたパラメータ ====="
 puts "Gap: #{params[:Gap]}"
-puts "GapProfit: #{params[:Gap]}"
+puts "GapProfit: #{params[:Takeprofit]}"
 puts "next_order_keisu: #{((params[:Gap] + params[:Takeprofit]) / params[:Takeprofit]) * params[:keisu_x]}"
 puts "===================================="
 

@@ -3,4 +3,5 @@
 /results
 /config/database.yml
 /config/master.key
+/data/samples/*.csv
 .env

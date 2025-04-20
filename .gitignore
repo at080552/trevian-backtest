@@ -6,4 +6,3 @@
 /data/samples/*.csv
 /data/histdata/*.csv
 .env
-Gemfile.lock

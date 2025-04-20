@@ -6,40 +6,17 @@ module MT4Backtester
         attr_reader :params
         
         def initialize(params = {}, debug_mode = false)
-          # デフォルトパラメータ
-          @default_params = {
-            Gap: 4000.0,
-            Takeprofit: 60.0,
-            Start_Lots: 0.95,
-            Gap_down_Percent: 0,
-            Profit_down_Percent: 0,
-            strategy_test: 0,
-            Start_Sikin: 300,
-            MinusLot: 0.99,
-            MaxLotX: 100,
-            lot_seigen: 100,
-            lot_pos_seigen: 30,
-            fukuri: 1,
-            limit_baisu: 10,
-            keisu_x: 9.9,
-            keisu_pulus_pips: 0.35,
-            position_x: 1,
-            SpredKeisuu: 10000,
-            MAGIC: 8888,
-            LosCutPosition: 15,
-            LosCutProfit: -900,
-            LosCutPlus: -40,
-            trailLength: 99
-          }
-
+          # 環境変数から設定を読み込む
+          env_params = MT4Backtester::Config::ConfigLoader.load
+          
           # パラメータのマージ（ユーザー指定のパラメータを優先）
-          @params = @default_params.merge(params)
+          @params = env_params.merge(params)
           
           # 計算パラメータ
           @params[:GapProfit] = @params[:Gap]
           @params[:next_order_keisu] = ((@params[:GapProfit] + @params[:Takeprofit]) / @params[:Takeprofit]) * @params[:keisu_x]
           @params[:profit_rate] = @params[:Takeprofit] / @params[:SpredKeisuu]
-          
+
           # アカウント情報の初期化
           @account_info = {
             balance: @params[:Start_Sikin],
@@ -54,7 +31,10 @@ module MT4Backtester
           @positions = []
 
           @debug_mode = debug_mode
-          
+
+          # 通貨ペアの設定
+          set_spred_keisuu(params[:Symbol])
+
           # 戦略実行状態
           reset_state
         end
@@ -88,18 +68,140 @@ module MT4Backtester
             last_lots: 0
           }
         end
-        
+
+        # 通貨ペアに応じたSpredKeisuu設定
+        def set_spred_keisuu(symbol = nil)
+          symbol ||= @params[:Symbol] || 'GBPUSD'
+          
+          # 通貨ペアに応じて調整係数を設定
+          case symbol
+          when 'USDJPY', 'GBPJPY', 'EURJPY', 'AUDJPY', 'GOLD'
+            @params[:SpredKeisuu] = 100
+          when 'GBPUSD', 'EURUSD', 'EURAUD', 'AUDNZD', 'AUDCAD', 'EURGBP'
+            @params[:SpredKeisuu] = 10000
+          else
+            # デフォルト値
+            @params[:SpredKeisuu] = 10000
+          end
+          
+          puts "通貨ペア: #{symbol}, SpredKeisuu: #{@params[:SpredKeisuu]}" if @debug_mode
+          
+          # profit_rateも更新
+          @params[:profit_rate] = @params[:Takeprofit] / @params[:SpredKeisuu]
+        end
+
+        # スプレッドを考慮したポジション損益計算
+        def calculate_position_profit_with_spread(position, tick)
+          # スプレッド値を想定（実際のバックテストデータではスプレッド情報がないかもしれないので注意）
+          spread = tick[:spread] || 2.0  # スプレッドがない場合は2.0pipsを想定
+          
+          if position[:type] == :buy
+            # 買いポジションの損益計算
+            profit = (tick[:close] - position[:open_price]) * @params[:SpredKeisuu]
+            # スプレッドを考慮した実質損益（決済コスト考慮）
+            real_profit = profit - (spread * position[:lot_size])
+            return real_profit
+          else
+            # 売りポジションの損益計算
+            profit = (position[:open_price] - tick[:close]) * @params[:SpredKeisuu]
+            # スプレッドを考慮した実質損益（決済コスト考慮）
+            real_profit = profit - (spread * position[:lot_size])
+            return real_profit
+          end
+        end
+
+        # ポジションの利益計算
+        def calculate_position_profit(position, tick)
+          if position[:type] == :buy
+            (tick[:close] - position[:open_price]) * @params[:SpredKeisuu]
+          else
+            (position[:open_price] - tick[:close]) * @params[:SpredKeisuu]
+          end
+        end
+
+        # Pips値の計算
+        def pips
+          symbol = @params[:Symbol] || 'GBPUSD'
+          
+          # シンボルに基づいて小数点以下の桁数を決定
+          digits = case symbol
+            when /JPY$/ then 3  # 円ペア
+            when 'GBPUSD', 'EURUSD', 'EURGBP' then 5
+            else 4
+          end
+          
+          # MT4のPips関数を模倣
+          if digits == 3 || digits == 5
+            return (0.0001 * 10).round(digits - 1)
+          elsif digits == 4 || digits == 2
+            return 0.0001
+          else
+            return 0.1
+          end
+        end
+
+        # 時間制御機能の実装
+        def check_time_control(tick)
+          time = tick[:time]
+          # 曜日と時間を取得
+          day_of_week = time.wday  # 0=日曜, 1=月曜, ..., 6=土曜
+          hour = time.hour
+          
+          # 状態を保持する変数
+          @close_flag ||= 0
+          
+          # 金曜日(5)の場合
+          if day_of_week == 5 && hour >= 20
+            @close_flag = 1 if @close_flag == 0
+          end
+          
+          # 土曜日(6)の場合
+          if day_of_week == 6
+            @close_flag = 1
+          end
+          
+          # 月曜日(1)の場合で保有ポジションがない場合
+          if day_of_week == 1
+            if hour >= 10
+              @close_flag = 0
+            elsif @close_flag == 0 && @positions.empty?
+              @close_flag = 1
+            end
+          end
+          
+          # 火曜から木曜(2-4)の場合
+          if day_of_week >= 2 && day_of_week <= 4
+            @close_flag = 0 if @close_flag == 1
+          end
+          
+          return @close_flag
+        end
+
         # ティックデータに対して戦略を適用
         def process_tick(tick, account_info)
           # アカウント情報の更新
           @account_info = account_info
           update_account_info(account_info)
           
+          # 時間制御確認
+          time_control = check_time_control(tick)
+          
+          # ポジション管理（常に実行）
+          manage_positions(tick)
+          
+          # 時間制御がアクティブな場合は新規取引を行わない
+          if time_control == 1
+            # ポジションがある場合は決済を検討
+            if !@positions.empty?
+              # 金曜日や週末のポジション決済ロジックをここに実装
+              # 実際のMT4版では金曜日の夜などに積極的な決済を行う
+            end
+            return
+          end
+          
+          # 以下は既存コード
           # エントリーポイント判定
           entry_signal = check_entry_conditions(tick)
-          
-          # ポジション管理
-          manage_positions(tick)
           
           # 新規エントリー
           if @positions.empty? && entry_signal != :none
@@ -551,49 +653,76 @@ module MT4Backtester
           return unless @state[:trailing_stop_flag] == 1
           return if @positions.empty?
           
+          # トレーリングが有効でポジションがない場合は状態をリセット
+          if @positions.empty?
+            @state[:trailing_stop_flag] = 0
+            return
+          end
+          
           position = @positions.first
+          price = tick[:close]
+          pip_value = pips  # Pips関数で計算した値
           
           if position[:type] == :buy
+            # 買いポジションのトレーリングストップ
             if position[:stop_loss].nil? || position[:stop_loss] < position[:open_price]
-              # 利益が一定以上あればストップを設定
-              profit = (tick[:close] - position[:open_price]) / pips
+              # 最初のストップロス設定（オープン価格に設定）
+              profit = (price - position[:open_price]) / pip_value
+              
               if profit > @params[:trailLength]
+                # 利益が一定以上あればストップロスをオープン価格に設定
                 position[:stop_loss] = position[:open_price]
+                puts "Buy: 初期ストップロス設定 #{position[:stop_loss]}" if @debug_mode
               end
             else
-              # ストップを徐々に引き上げる
-              profit = (tick[:close] - position[:stop_loss]) / pips
+              # ストップロスを徐々に引き上げる
+              profit = (price - position[:stop_loss]) / pip_value
+              
               if profit > @params[:trailLength] * 2
-                position[:stop_loss] += @params[:trailLength] * pips
+                # 新しいストップロスを計算
+                new_stop_loss = position[:stop_loss] + (@params[:trailLength] * pip_value)
+                position[:stop_loss] = new_stop_loss
+                puts "Buy: ストップロス更新 #{position[:stop_loss]}" if @debug_mode
               end
             end
             
             # ストップロスヒットの確認
-            if position[:stop_loss] && tick[:close] <= position[:stop_loss]
+            if position[:stop_loss] && price <= position[:stop_loss]
               close_position(position, tick)
               @positions.clear
               @state[:trailing_stop_flag] = 0
+              puts "Buy: ストップロスヒット" if @debug_mode
             end
+            
           elsif position[:type] == :sell
+            # 売りポジションのトレーリングストップ
             if position[:stop_loss].nil? || position[:stop_loss] > position[:open_price]
-              # 利益が一定以上あればストップを設定
-              profit = (position[:open_price] - tick[:close]) / pips
+              # 最初のストップロス設定（オープン価格に設定）
+              profit = (position[:open_price] - price) / pip_value
+              
               if profit > @params[:trailLength]
+                # 利益が一定以上あればストップロスをオープン価格に設定
                 position[:stop_loss] = position[:open_price]
+                puts "Sell: 初期ストップロス設定 #{position[:stop_loss]}" if @debug_mode
               end
             else
-              # ストップを徐々に引き下げる
-              profit = (position[:stop_loss] - tick[:close]) / pips
+              # ストップロスを徐々に引き下げる
+              profit = (position[:stop_loss] - price) / pip_value
+              
               if profit > @params[:trailLength] * 2
-                position[:stop_loss] -= @params[:trailLength] * pips
+                # 新しいストップロスを計算
+                new_stop_loss = position[:stop_loss] - (@params[:trailLength] * pip_value)
+                position[:stop_loss] = new_stop_loss
+                puts "Sell: ストップロス更新 #{position[:stop_loss]}" if @debug_mode
               end
             end
             
             # ストップロスヒットの確認
-            if position[:stop_loss] && tick[:close] >= position[:stop_loss]
+            if position[:stop_loss] && price >= position[:stop_loss]
               close_position(position, tick)
               @positions.clear
               @state[:trailing_stop_flag] = 0
+              puts "Sell: ストップロスヒット" if @debug_mode
             end
           end
         end
@@ -606,27 +735,56 @@ module MT4Backtester
           if @positions.size >= @params[:LosCutPosition]
             total_profit = 0
             
+            # すべてのポジションの損益を計算
             @positions.each do |pos|
-              total_profit += calculate_position_profit(pos, tick)
+              # スプレッドを考慮した損益計算
+              profit = calculate_position_profit_with_spread(pos, tick)
+              total_profit += profit
             end
             
+            # 福利計算による損失閾値の調整
             loss_cut_profit = @params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1))
             
+            puts "総損益: #{total_profit}, ロスカット閾値: #{loss_cut_profit}" if @debug_mode
+            
             if total_profit < loss_cut_profit
-              # 全ポジションをクローズ
-              @positions.each do |pos|
-                close_position(pos, tick)
-              end
+              puts "ロスカット発動! 総ポジション数: #{@positions.size}, 総損益: #{total_profit}" if @debug_mode
               
-              @positions.clear
-              @state[:trailing_stop_flag] = 0
-              
-              # ポジション状態の更新
-              update_position_state
+              # すべてのポジションをクローズ
+              all_delete(tick)
             end
           end
         end
-        
+
+        # すべてのポジションを削除
+        def all_delete(tick)
+          return if @positions.empty?
+          
+          # ロスカットフラグを設定
+          @all_delete_flag = 1
+          
+          # すべてのポジションを閉じる
+          @positions.each do |pos|
+            close_position(pos, tick)
+          end
+          
+          # ポジションをクリアし、状態をリセット
+          @positions = []
+          @state[:first_order] = 0
+          @state[:next_order] = 0
+          @state[:trailing_stop_flag] = 0
+          @state[:first_rate] = 0
+          @state[:order_rate] = 0
+          
+          # ロスカットフラグをリセット
+          @all_delete_flag = 0
+          
+          # 状態更新
+          update_position_state
+          
+          puts "すべてのポジションをクローズしました" if @debug_mode
+        end
+
         # 最大ドローダウン更新
         def update_max_drawdown
           # 残高の履歴から最大ドローダウンを計算
@@ -636,11 +794,6 @@ module MT4Backtester
         # チケットID生成
         def generate_ticket_id
           Time.now.to_i + rand(1000)
-        end
-        
-        # pips値の取得
-        def pips
-          0.0001  # 4桁の通貨の場合
         end
         
         # 結果の取得

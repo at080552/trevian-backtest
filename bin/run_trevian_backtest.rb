@@ -2,7 +2,8 @@
 
 require 'optparse'
 require_relative '../lib/mt4_backtester'
-
+# 環境変数から設定を読み込む
+params = MT4Backtester::Config::ConfigLoader.load
 # コマンドラインオプションのパース
 options = {
   mq4_file: 'data/trevian_ZA701.mq4',
@@ -11,7 +12,10 @@ options = {
   end_date: nil,
   output_file: nil,
   symbol: 'GBPUSD',
-  timeframe: 'M1'
+  timeframe: 'M1',
+  gap: params[:Gap],
+  takeprofit: params[:Takeprofit],
+  start_lots: params[:Start_Lots]
 }
 
 OptionParser.new do |opts|

@@ -2,7 +2,10 @@
 
 require 'optparse'
 require_relative '../lib/mt4_backtester'
+# .envから設定を読み込む
+env_params = MT4Backtester::Config::ConfigLoader.load
 
+#raise params.inspect
 # コマンドラインオプションのパース
 options = {
   mq4_file: 'data/trevian_ZA701.mq4',
@@ -13,7 +16,10 @@ options = {
   chart_file: nil,
   symbol: 'GBPUSD',
   timeframe: 'M1',
-  debug_mode: false
+  debug_mode: false,
+  gap: env_params[:Gap],
+  takeprofit: env_params[:Takeprofit],
+  start_lots: env_params[:Start_Lots]
 }
 
 OptionParser.new do |opts|
@@ -91,8 +97,8 @@ strategy_data = parser.parse
 puts "EA名: #{strategy_data[:name]}"
 puts "パラメータ数: #{strategy_data[:parameters].size}"
 
-# パラメータの変換
-params = {}
+# MT4ファイルから読み込んだパラメータを変換
+mt4_params = {}
 strategy_data[:parameters].each do |param|
   key = param[:name].to_sym
   value = case param[:type]
@@ -103,8 +109,11 @@ strategy_data[:parameters].each do |param|
            else
              param[:default_value]
            end
-  params[key] = value
+  mt4_params[key] = value
 end
+
+# 優先順位: MT4ファイル < .env < コマンドライン引数
+params = mt4_params.merge(env_params) # .envの値でMT4の値を上書き
 
 # 計算パラメータを表示
 puts "\n===== 計算されたパラメータ ====="

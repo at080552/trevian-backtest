@@ -57,3 +57,5 @@ require_relative 'mt4_backtester/visualization/html_chart_generator'
 
 # コアモジュール
 require_relative 'mt4_backtester/core/backtester'
+
+require_relative 'mt4_backtester/config/config_loader'

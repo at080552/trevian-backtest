@@ -198,7 +198,7 @@ module MT4Backtester
               label: function(context) {
                 const point = context.dataset.tradeData ? context.dataset.tradeData[context.dataIndex] : null;
                 if (point) {
-                  return `${point.action === 'entry' ? 'エントリー' : '決済'} (${point.type === 'buy' ? '買い' : '売り'}) - ロット: ${point.lot}${point.profit ? ' - 利益: $' + point.profit.toFixed(2) : ''}`;
+                  return `${point.action === 'entry' ? 'エントリー' : '決済'} (${point.type === 'buy' ? '買い' : '売り'}) - ロット: ${point.lot.toFixed(2)}${point.profit ? ' - 利益: $' + point.profit.toFixed(2) : ''}`;
                 }
                 return `価格: ${context.parsed.y}`;
               }
@@ -335,7 +335,7 @@ HTML
             params_html += <<-HTML
         <div class="parameter-item">
           <span class="parameter-name">#{label}</span>
-          <span class="parameter-value">#{format('%.2f', params[key].to_f)}#{}</span>
+          <span class="parameter-value">#{format('%.2f', params[key].to_f)}</span>
         </div>
             HTML
           end
@@ -429,7 +429,7 @@ HTML
         <tr>
           <td>#{i + 1}</td>
           <td>#{entry[:type] == 'buy' ? '買い' : '売り'}</td>
-          <td>#{entry[:lot]}</td>
+          <td>#{format('%.2f', entry[:lot].to_f)}</td>
           <td>#{entry[:time]}</td>
           <td>#{entry[:price]}</td>
           <td>#{exit[:time]}</td>

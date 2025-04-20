@@ -6,6 +6,7 @@ gem 'zeitwerk'
 gem 'parallel'
 gem 'ffi'
 gem "terminal-table"
+gem 'dotenv'
 
 # 開発ツール
 group :development do

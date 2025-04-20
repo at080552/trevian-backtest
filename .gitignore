@@ -4,4 +4,6 @@
 /config/database.yml
 /config/master.key
 /data/samples/*.csv
+/data/histdata/*.csv
 .env
+Gemfile.lock

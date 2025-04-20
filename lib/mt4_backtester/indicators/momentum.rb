@@ -1,0 +1,36 @@
+module MT4Backtester
+  module Indicators
+    class Momentum
+      attr_reader :data
+      
+      def initialize(period = 14, price_type = :close)
+        @period = period
+        @price_type = price_type
+        @data = []
+      end
+      
+      def calculate(price_data)
+        @data = []
+        
+        return @data if price_data.length <= @period
+        
+        price_data.each_with_index do |candle, i|
+          if i >= @period
+            current = candle[@price_type]
+            previous = price_data[i - @period][@price_type]
+            @data << (current / previous) * 100
+          else
+            @data << nil
+          end
+        end
+        
+        @data
+      end
+      
+      def value(index)
+        return nil if index >= @data.length || index < 0
+        @data[index]
+      end
+    end
+  end
+end

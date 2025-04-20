@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    volumes:
+      - .:/app
+      - gem_cache:/usr/local/bundle
+    environment:
+      - RUBY_ENV=development
+    ports:
+      - "3000:3000"
+    tty: true
+    stdin_open: true
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  gem_cache:
+  redis_data:

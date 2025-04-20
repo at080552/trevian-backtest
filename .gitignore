@@ -1,0 +1,6 @@
+/log
+/tmp
+/results
+/config/database.yml
+/config/master.key
+.env

@@ -17,6 +17,8 @@ module MT4Backtester
         
         # 戦略を実行
         @results = @strategy.run(@tick_data)
+        # テクニカル指標データの追加
+        @results[:indicators] = @strategy.get_indicators_data if @strategy.respond_to?(:get_indicators_data)
         
         end_time = Time.now
         puts "バックテスト実行時間: #{(end_time - start_time).round(2)}秒"

@@ -27,6 +27,16 @@ module MT4Backtester
         @data
       end
       
+      # 現在の値を取得するメソッドを追加
+      def current_value
+        @data.empty? ? nil : @data.last
+      end
+      
+      # 前回の値を取得するメソッドを追加
+      def previous_value
+        @data.length < 2 ? nil : @data[-2]
+      end
+      
       def value(index)
         return nil if index >= @data.length || index < 0
         @data[index]

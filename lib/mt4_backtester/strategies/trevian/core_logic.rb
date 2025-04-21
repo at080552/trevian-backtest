@@ -3,7 +3,7 @@ module MT4Backtester
     module Trevian
       class CoreLogic
         # 戦略パラメータ
-        attr_reader :params
+        attr_reader :params, :indicator_calculator
         
         def initialize(params = {}, debug_mode = false)
           # 環境変数から設定を読み込む
@@ -11,7 +11,9 @@ module MT4Backtester
           
           # パラメータのマージ（ユーザー指定のパラメータを優先）
           @params = env_params.merge(params)
-          
+          @indicator_calculator = nil
+          @candles = []  # ここでローソク足データを保持する配列を初期化
+
           # 計算パラメータ
           @params[:GapProfit] = @params[:Gap]
           @params[:next_order_keisu] = ((@params[:GapProfit] + @params[:Takeprofit]) / @params[:Takeprofit]) * @params[:keisu_x]
@@ -179,6 +181,12 @@ module MT4Backtester
 
         # ティックデータに対して戦略を適用
         def process_tick(tick, account_info)
+          # 日時表示
+          #puts "処理日時: #{tick[:time]}"
+          # エントリー条件チェック
+          #entry_signal = check_entry_conditions(tick)
+          #puts "エントリーシグナル: #{entry_signal}, ポジション数: #{@positions.size}"
+
           # アカウント情報の更新
           @account_info = account_info
           update_account_info(account_info)
@@ -239,20 +247,31 @@ module MT4Backtester
         # 指標データの準備
         def prepare_indicators(tick)
           # この部分を実装する必要があります
-          # ローソク足データの生成（ティックデータから）
-          # データがなければ@candlesを初期化
-          if @candles.nil?
-            @candles = []
+          if @indicator_calculator.nil?
             @indicator_calculator = MT4Backtester::Indicators::IndicatorCalculator.new
             
             # Trevianで使用される移動平均を追加
             @indicator_calculator.add_ma(:fast_ma, 5)  # 短期移動平均（5期間）
             @indicator_calculator.add_ma(:slow_ma, 14) # 長期移動平均（14期間）
+            # モメンタム指標の追加
+            @indicator_calculator.indicators ||= {}
+            begin
+              momentum = MT4Backtester::Indicators::Momentum.new(20)
+              @indicator_calculator.indicators[:momentum] = momentum
+              @indicator_calculator.calculate(momentum)
+            rescue => e
+              puts "モメンタム指標の追加に失敗しました: #{e.message}" if @debug_mode
+            end
           end
+          # ティックデータからローソク足を更新
+          update_indicator_with_tick(tick)
+        end
+
+        # カンドルデータを更新する処理
+        def update_indicator_with_tick(tick)
+          return unless @indicator_calculator
           
-          # 新しいローソク足データの追加
-          # 実際の実装ではティックデータからOHLCを生成する必要がある
-          # 簡略化のためティックのcloseをそのまま使用
+          # 新しいカンドルを作成
           new_candle = {
             time: tick[:time],
             open: tick[:open],
@@ -262,15 +281,24 @@ module MT4Backtester
             volume: tick[:volume]
           }
           
-          # 新しいローソク足を追加して指標再計算
-          @candles << new_candle
+          # 新しいカンドルを追加するか、最後のカンドルを更新
+          if @candles.empty? || (tick[:time] - @candles.last[:time]) >= 60  # 1分以上経過したら新しいカンドル
+            @candles << new_candle
+          else
+            # 同じ時間枠内なら高値・安値・終値を更新
+            last_candle = @candles.last
+            last_candle[:high] = [last_candle[:high], tick[:high]].max
+            last_candle[:low] = [last_candle[:low], tick[:low]].min
+            last_candle[:close] = tick[:close]
+            last_candle[:volume] += tick[:volume]
+          end
           
           # 一定数以上になったら古いデータを削除（メモリ効率化）
           if @candles.length > 500
             @candles.shift
           end
           
-          # 指標の計算
+          # インジケーターを更新
           @indicator_calculator.set_candles(@candles)
         end
         
@@ -291,6 +319,8 @@ module MT4Backtester
         # ポジションのオープン
         def open_position(tick, signal)
           lot_size = calculate_lot_size
+          # エントリー理由を追加
+          entry_reason = get_entry_reason(signal)
           
           position = {
             ticket: generate_ticket_id,
@@ -299,7 +329,8 @@ module MT4Backtester
             open_price: signal == :buy ? tick[:close] : tick[:close],
             lot_size: lot_size,
             stop_loss: nil,
-            take_profit: nil
+            take_profit: nil,
+            reason: entry_reason  # 理由を追加
           }
           
           @positions << position
@@ -634,13 +665,17 @@ module MT4Backtester
         # ポジションのクローズ
         def close_position(position, tick, profit = nil)
           profit ||= calculate_position_profit(position, tick)
+
+          # 決済理由を追加
+          exit_reason = get_exit_reason(position, tick)
           
           trade = position.merge(
             close_time: tick[:time],
             close_price: tick[:close],
-            profit: profit
+            profit: profit,
+            exit_reason: exit_reason  # 決済理由を追加
           )
-          
+
           @orders << trade
           @total_profit += profit
           
@@ -726,7 +761,60 @@ module MT4Backtester
             end
           end
         end
+
+        def get_entry_reason(signal)
+          if signal == :buy
+            # 買いエントリーの理由
+            if @indicator_calculator && @indicator_calculator.value(:fast_ma) && @indicator_calculator.value(:slow_ma)
+              fast_ma = @indicator_calculator.value(:fast_ma)
+              slow_ma = @indicator_calculator.value(:slow_ma)
+              
+              if fast_ma > slow_ma
+                return "MA(5)がMA(14)を上回ったため"
+              end
+            end
+            return "買いシグナル発生"
+          else
+            # 売りエントリーの理由
+            if @indicator_calculator && @indicator_calculator.value(:fast_ma) && @indicator_calculator.value(:slow_ma)
+              fast_ma = @indicator_calculator.value(:fast_ma)
+              slow_ma = @indicator_calculator.value(:slow_ma)
+              
+              if fast_ma < slow_ma
+                return "MA(5)がMA(14)を下回ったため"
+              end
+            end
+            return "売りシグナル発生"
+          end
+        end
         
+        def get_exit_reason(position, tick)
+          # トレーリングストップによる決済
+          if @state[:trailing_stop_flag] == 1
+            return "トレーリングストップによる決済"
+          end
+          
+          # 利益確定による決済
+          profit = calculate_position_profit(position, tick)
+          profit_pips = @params[:Takeprofit]
+          
+          if @positions.size > @params[:position_x]
+            profit_zz_total = (@positions.size - @params[:position_x]) * @params[:Profit_down_Percent]
+            profit_pips = @params[:Takeprofit] * (1 - (profit_zz_total / 100))
+          end
+          
+          if profit >= profit_pips
+            return "利益確定 (#{profit_pips.round(1)}pips)"
+          end
+          
+          # ロスカットによる決済
+          if profit < (@params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1)))
+            return "ロスカット"
+          end
+          
+          return "決済"
+        end
+
         # ロスカット判定
         def check_loss_cut(tick)
           return if @positions.empty?

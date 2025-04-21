@@ -3,17 +3,19 @@ require 'json'  # JSONライブラリを明示的にインポート
 module MT4Backtester
   module Visualization
     class ChartDataProcessor
+
       def initialize(backtest_results, tick_data)
         @results = backtest_results
         @tick_data = tick_data
         @equity_curve = []
         @price_data = []
         @trade_points = []
+        @indicator_data = backtest_results[:indicators] || {}
         
         process_data
       end
       
-      attr_reader :equity_curve, :price_data, :trade_points, :results
+      attr_reader :equity_curve, :price_data, :trade_points, :results, :indicator_data
       
       def process_data
         # 価格データの準備（1時間ごとにサンプリング）
@@ -24,6 +26,19 @@ module MT4Backtester
         
         # 取引ポイントの準備
         process_trade_points
+        
+        # インジケーターデータの処理
+        process_indicator_data
+      end
+
+      def process_indicator_data
+        # データが無い場合は何もしない
+        return if @indicator_data.empty?
+        
+        # 各インジケーターのデータを時間でソート
+        @indicator_data.each do |indicator_name, data_points|
+          @indicator_data[indicator_name] = data_points.sort_by { |point| point[:time] }
+        end
       end
       
       private
@@ -121,7 +136,8 @@ module MT4Backtester
             price: trade[:open_price],
             type: trade[:type].to_s,
             action: 'entry',
-            lot: trade[:lot_size]
+            lot: trade[:lot_size],
+            reason: trade[:reason] || "エントリー"
           }
           
           # 決済ポイント
@@ -131,13 +147,15 @@ module MT4Backtester
             type: trade[:type].to_s,
             action: 'exit',
             lot: trade[:lot_size],
-            profit: trade[:profit]
+            profit: trade[:profit],
+            reason: trade[:exit_reason] || "決済"
           }
         end
         
         # 時間順にソート
         @trade_points.sort_by! { |point| point[:time] }
       end
+
     end
   end
 end

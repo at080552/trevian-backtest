@@ -7,6 +7,12 @@ module MT4Backtester
         @indicators = {}
         @candles = []
       end
+
+      def add_indicator(name, indicator)
+        @indicators[name] = indicator
+        calculate(@indicators[name]) if @candles.any?
+        @indicators[name]
+      end
       
       # ローソク足データを設定
       def set_candles(candles)
@@ -32,13 +38,20 @@ module MT4Backtester
           calculate(indicator)
         end
       end
-      
-      # 現在の値を取得
+
       def value(name)
         return nil unless @indicators[name]
-        @indicators[name].current_value
+        
+        # インジケーターの種類によって適切なメソッドを呼び出す
+        if @indicators[name].respond_to?(:current_value)
+          @indicators[name].current_value
+        elsif @indicators[name].respond_to?(:value)
+          @indicators[name].value(0)  # 最新の値（インデックス0）
+        else
+          nil
+        end
       end
-      
+
       # 前回値を取得
       def previous_value(name)
         return nil unless @indicators[name]

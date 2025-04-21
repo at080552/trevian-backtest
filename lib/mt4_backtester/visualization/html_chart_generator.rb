@@ -130,11 +130,20 @@ module MT4Backtester
         #{generate_parameters_html}
       </div>
     </div>
-    
+
     <div class="stats-container">
       #{generate_stats_html}
     </div>
-    
+
+    <div class="indicator-controls">
+    <h3>テクニカル指標</h3>
+    <div class="checkbox-group">
+      <label><input type="checkbox" id="showFastMA" checked> 短期MA(5)</label>
+      <label><input type="checkbox" id="showSlowMA" checked> 長期MA(14)</label>
+      <label><input type="checkbox" id="showMomentum"> モメンタム(20)</label>
+    </div>
+  </div>
+
     <div class="chart-container">
       <canvas id="priceChart"></canvas>
     </div>
@@ -146,67 +155,118 @@ module MT4Backtester
     #{generate_trades_table_html}
   </div>
 
+
+<script>
+  // インジケーター表示切り替え用のJavaScript
+  document.getElementById('showFastMA').addEventListener('change', function() {
+    const dataset = priceChart.data.datasets.find(d => d.label === '短期MA(5)');
+    if (dataset) {
+      dataset.hidden = !this.checked;
+      priceChart.update();
+    }
+  });
+  
+  document.getElementById('showSlowMA').addEventListener('change', function() {
+    const dataset = priceChart.data.datasets.find(d => d.label === '長期MA(14)');
+    if (dataset) {
+      dataset.hidden = !this.checked;
+      priceChart.update();
+    }
+  });
+  
+  document.getElementById('showMomentum').addEventListener('change', function() {
+    const dataset = priceChart.data.datasets.find(d => d.label === 'モメンタム(20)');
+    if (dataset) {
+      dataset.hidden = !this.checked;
+      priceChart.update();
+    }
+  });
+</script>
+
   <script>
-    // 価格チャートの設定
-    const priceCtx = document.getElementById('priceChart').getContext('2d');
-    const priceChart = new Chart(priceCtx, {
-      type: 'line',
-      data: {
-        datasets: [
-          {
-            label: '価格',
-            data: #{price_data_json},
-            borderColor: 'rgb(75, 192, 192)',
-            tension: 0.1,
-            pointRadius: 0,
-            borderWidth: 1
-          },
-          #{generate_trade_points_datasets}
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            type: 'time',
-            time: {
-              unit: 'day',
-              displayFormats: {
-                day: 'yyyy-MM-dd'
-              }
-            },
-            title: {
-              display: true,
-              text: '日付'
-            }
-          },
-          y: {
-            title: {
-              display: true,
-              text: '価格'
-            }
-          }
+  //価格チャートの設定
+  const priceCtx = document.getElementById('priceChart').getContext('2d');
+  const priceChart = new Chart(priceCtx, {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: '価格',
+          data: #{price_data_json},
+          borderColor: 'rgb(75, 192, 192)',
+          tension: 0.1,
+          pointRadius: 0,
+          borderWidth: 1,
+          yAxisID: 'y'
         },
-        plugins: {
+        #{generate_indicator_datasets},
+        #{generate_trade_points_datasets}
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          type: 'time',
+          time: {
+            unit: 'day',
+            displayFormats: {
+              day: 'yyyy-MM-dd'
+            }
+          },
           title: {
             display: true,
-            text: '価格チャートと取引ポイント'
+            text: '日付'
+          }
+        },
+        y: {
+          title: {
+            display: true,
+            text: '価格'
           },
-          tooltip: {
-            callbacks: {
-              label: function(context) {
-                const point = context.dataset.tradeData ? context.dataset.tradeData[context.dataIndex] : null;
+          position: 'left'
+        },
+        y2: {
+          title: {
+            display: true,
+            text: 'テクニカル指標'
+          },
+          position: 'right',
+          grid: {
+            drawOnChartArea: false
+          }
+        }
+      },
+      plugins: {
+        title: {
+          display: true,
+          text: '価格チャートとテクニカル指標'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const dataset = context.dataset;
+              if (dataset.tradeData) {
+                const point = dataset.tradeData[context.dataIndex];
                 if (point) {
-                  return `${point.action === 'entry' ? 'エントリー' : '決済'} (${point.type === 'buy' ? '買い' : '売り'}) - ロット: ${point.lot.toFixed(2)}${point.profit ? ' - 利益: $' + point.profit.toFixed(2) : ''}`;
+                  let label = `${point.action === 'entry' ? 'エントリー' : '決済'} (${point.type === 'buy' ? '買い' : '売り'})`;
+                  label += ` - ロット: ${point.lot}`;
+                  if (point.profit) label += ` - 利益: $${point.profit.toFixed(2)}`;
+                  if (point.reason) label += ` - 理由: ${point.reason}`;
+                  return label;
                 }
-                return `価格: ${context.parsed.y}`;
               }
+              if (dataset.type === 'line' && dataset.label.includes('MA')) {
+                return `${dataset.label}: ${context.parsed.y.toFixed(5)}`;
+              }
+              return `${dataset.label}: ${context.parsed.y}`;
             }
           }
         }
       }
-    });
+    }
+  });
 
     // 資産チャートの設定
     const equityCtx = document.getElementById('equityChart').getContext('2d');
@@ -279,7 +339,9 @@ module MT4Backtester
       }
     });
   </script>
-</body>
+
+
+  </body>
 </html>
 HTML
 
@@ -287,6 +349,73 @@ HTML
       end
       
       private
+
+      def generate_indicator_datasets
+        return "" if @chart_data.indicator_data.empty?
+        
+        datasets = []
+        
+        # 移動平均線データセット
+        if @chart_data.indicator_data[:ma_fast] && !@chart_data.indicator_data[:ma_fast].empty?
+          ma_fast_data = JSON.generate(@chart_data.indicator_data[:ma_fast].map do |point|
+            { x: point[:time], y: point[:value] }
+          end)
+          
+          datasets << %{
+            {
+              label: '短期MA(5)',
+              data: #{ma_fast_data},
+              borderColor: 'rgba(255, 99, 132, 1)',
+              borderWidth: 1.5,
+              pointRadius: 0,
+              tension: 0.1,
+              yAxisID: 'y'
+            }
+          }
+        end
+        
+        if @chart_data.indicator_data[:ma_slow] && !@chart_data.indicator_data[:ma_slow].empty?
+          ma_slow_data = JSON.generate(@chart_data.indicator_data[:ma_slow].map do |point|
+            { x: point[:time], y: point[:value] }
+          end)
+          
+          datasets << %{
+            {
+              label: '長期MA(14)',
+              data: #{ma_slow_data},
+              borderColor: 'rgba(54, 162, 235, 1)',
+              borderWidth: 1.5,
+              pointRadius: 0,
+              tension: 0.1,
+              yAxisID: 'y'
+            }
+          }
+        end
+        
+        # モメンタム指標（別のY軸を使用）
+        if @chart_data.indicator_data[:momentum] && !@chart_data.indicator_data[:momentum].empty?
+          momentum_data = JSON.generate(@chart_data.indicator_data[:momentum].map do |point|
+            { x: point[:time], y: point[:value] }
+          end)
+          
+          datasets << %{
+            {
+              label: 'モメンタム(20)',
+              data: #{momentum_data},
+              borderColor: 'rgba(153, 102, 255, 1)',
+              backgroundColor: 'rgba(153, 102, 255, 0.2)',
+              borderWidth: 1,
+              pointRadius: 0,
+              fill: true,
+              tension: 0.1,
+              yAxisID: 'y2',
+              hidden: true
+            }
+          }
+        end
+        
+        datasets.join(",\n")
+      end
       
       def format_time_range
         return "データなし" if @chart_data.price_data.empty?
@@ -482,6 +611,7 @@ HTML
         # JSON文字列に変換する
         JSON.generate(data_points)
       end
+
       
       def generate_trade_points_datasets
         return "" if @chart_data.trade_points.empty?

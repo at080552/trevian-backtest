@@ -15,7 +15,6 @@ module MT4Backtester
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>#{title}</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Chart.js 本体（既にある） -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <!-- 追加：zoom プラグイン -->

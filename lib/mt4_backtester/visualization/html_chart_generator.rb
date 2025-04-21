@@ -16,7 +16,16 @@ module MT4Backtester
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>#{title}</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Chart.js 本体（既にある） -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <!-- 追加：zoom プラグイン -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+  <script>
+    Chart.register(window.ChartZoom);   // ← ChartZoom で OK
+  </script>
+
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -147,41 +156,19 @@ module MT4Backtester
     <div class="chart-container">
       <canvas id="priceChart"></canvas>
     </div>
-    
+
+    <button id="resetZoom">ズームをリセット</button>
+    <script>
+      document.getElementById('resetZoom')
+              .addEventListener('click', () => priceChart.resetZoom());
+    </script>
+
     <div class="chart-container">
       <canvas id="equityChart"></canvas>
     </div>
     
     #{generate_trades_table_html}
   </div>
-
-
-<script>
-  // インジケーター表示切り替え用のJavaScript
-  document.getElementById('showFastMA').addEventListener('change', function() {
-    const dataset = priceChart.data.datasets.find(d => d.label === '短期MA(5)');
-    if (dataset) {
-      dataset.hidden = !this.checked;
-      priceChart.update();
-    }
-  });
-  
-  document.getElementById('showSlowMA').addEventListener('change', function() {
-    const dataset = priceChart.data.datasets.find(d => d.label === '長期MA(14)');
-    if (dataset) {
-      dataset.hidden = !this.checked;
-      priceChart.update();
-    }
-  });
-  
-  document.getElementById('showMomentum').addEventListener('change', function() {
-    const dataset = priceChart.data.datasets.find(d => d.label === 'モメンタム(20)');
-    if (dataset) {
-      dataset.hidden = !this.checked;
-      priceChart.update();
-    }
-  });
-</script>
 
   <script>
   //価格チャートの設定
@@ -206,6 +193,10 @@ module MT4Backtester
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: {
+        intersect: false,
+        mode: 'index'  // ホバー時に垂直線を表示
+      },
       scales: {
         x: {
           type: 'time',
@@ -218,6 +209,9 @@ module MT4Backtester
           title: {
             display: true,
             text: '日付'
+          },
+          grid: {
+          color: 'rgba(200, 200, 200, 0.2)'  // グリッド線を薄く
           }
         },
         y: {
@@ -225,7 +219,10 @@ module MT4Backtester
             display: true,
             text: '価格'
           },
-          position: 'left'
+          position: 'left',
+          grid: {
+            color: 'rgba(200, 200, 200, 0.2)'  // グリッド線を薄く
+          }
         },
         y2: {
           title: {
@@ -239,9 +236,39 @@ module MT4Backtester
         }
       },
       plugins: {
+        zoom: {
+          zoom: {                      // ← 拡大（wheel / pinch）
+            wheel: { enabled: true, modifierKey: 'ctrl' }, // Ctrl+ホイールでズーム
+            pinch: { enabled: true },                     // モバイル pinch
+            mode: 'x',                                    // 'x' 方向だけ、必要なら 'xy'
+            overScaleMode: 'y',                           // マウス位置が指標側でもズーム
+          },
+          pan: {                        // ← ドラッグでスクロール
+            enabled: true,
+            mode: 'x',
+            onPanStart: ({chart}) => {
+              console.log('pan start', chart); // pan 開始時に表示
+            },
+            onPanComplete: ({chart}) => {
+              console.log('pan end', chart);   // 完了時にも表示（任意）
+            },
+            modifierKey: 'shift'        // Shift+ドラッグでパン
+          },
+          limits: {                     // ← ズームし過ぎを防ぐ
+            x: { min: 'original', max: 'original' },
+            y: { min: 'original', max: 'original' }
+          }
+        },
         title: {
           display: true,
           text: '価格チャートとテクニカル指標'
+        },
+        legend: {
+          position: 'top',
+          labels: {
+            padding: 10,
+            usePointStyle: true  // 凡例のポイントスタイルを改善
+          }
         },
         tooltip: {
           callbacks: {
@@ -338,8 +365,35 @@ module MT4Backtester
         }
       }
     });
-  </script>
+    </script>
 
+    <script>
+    // インジケーター表示切り替え用のJavaScript
+    document.getElementById('showFastMA').addEventListener('change', function() {
+      const dataset = priceChart.data.datasets.find(d => d.label === '短期MA(5)');
+      if (dataset) {
+        dataset.hidden = !this.checked;
+        priceChart.update();
+      }
+    });
+    
+    document.getElementById('showSlowMA').addEventListener('change', function() {
+      const dataset = priceChart.data.datasets.find(d => d.label === '長期MA(14)');
+      if (dataset) {
+        dataset.hidden = !this.checked;
+        priceChart.update();
+      }
+    });
+    
+    document.getElementById('showMomentum').addEventListener('change', function() {
+      const dataset = priceChart.data.datasets.find(d => d.label === 'モメンタム(20)');
+      if (dataset) {
+        dataset.hidden = !this.checked;
+        priceChart.update();
+      }
+    });
+  </script>
+  
 
   </body>
 </html>
@@ -358,7 +412,7 @@ HTML
         # 移動平均線データセット
         if @chart_data.indicator_data[:ma_fast] && !@chart_data.indicator_data[:ma_fast].empty?
           ma_fast_data = JSON.generate(@chart_data.indicator_data[:ma_fast].map do |point|
-            { x: point[:time], y: point[:value] }
+            { x: point[:time].strftime('%Y-%m-%d %H:%M'), y: point[:value] }
           end)
           
           datasets << %{
@@ -376,7 +430,7 @@ HTML
         
         if @chart_data.indicator_data[:ma_slow] && !@chart_data.indicator_data[:ma_slow].empty?
           ma_slow_data = JSON.generate(@chart_data.indicator_data[:ma_slow].map do |point|
-            { x: point[:time], y: point[:value] }
+            { x: point[:time].strftime('%Y-%m-%d %H:%M'), y: point[:value] }
           end)
           
           datasets << %{
@@ -395,7 +449,7 @@ HTML
         # モメンタム指標（別のY軸を使用）
         if @chart_data.indicator_data[:momentum] && !@chart_data.indicator_data[:momentum].empty?
           momentum_data = JSON.generate(@chart_data.indicator_data[:momentum].map do |point|
-            { x: point[:time], y: point[:value] }
+            { x: point[:time].strftime('%Y-%m-%d %H:%M'), y: point[:value] }
           end)
           
           datasets << %{
@@ -615,15 +669,14 @@ HTML
       
       def generate_trade_points_datasets
         return "" if @chart_data.trade_points.empty?
-        
+
         # エントリーポイント（買い）
         buy_entries = @chart_data.trade_points.select { |p| p[:action] == 'entry' && p[:type] == 'buy' }
         buy_entries_json = JSON.generate(buy_entries.map do |point|
           { x: point[:time], y: point[:price] }
         end)
-        
-        buy_entries_data = "{ label: 'エントリー(買)', data: #{buy_entries_json}, tradeData: #{JSON.generate(buy_entries)}, backgroundColor: 'green', borderColor: 'green', pointRadius: 6, pointStyle: 'triangle', showLine: false }"
-        
+
+        buy_entries_data = "{ label: 'エントリー(買)', data: #{buy_entries_json}, tradeData: #{JSON.generate(buy_entries)}, backgroundColor: 'rgba(0, 128, 0, 0.9)', borderColor: 'green', pointRadius: 8, pointStyle: 'triangle', showLine: false }"
         # エントリーポイント（売り）
         sell_entries = @chart_data.trade_points.select { |p| p[:action] == 'entry' && p[:type] == 'sell' }
         sell_entries_json = JSON.generate(sell_entries.map do |point|

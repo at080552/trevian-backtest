@@ -71,7 +71,17 @@ module MT4Backtester
       # 連続して上回る/下回るの確認
       def above?(other_ma, count = 2)
         return false if @data.length < count || other_ma.data.length < count
-        
+
+        # デバッグ出力
+        if @debug_mode
+          (1..count).each do |i|
+            idx = @data.length - i
+            if idx >= 0
+              puts "MA比較[#{i}]: self=#{@data[idx]}, other=#{other_ma.data[idx]}, above?=#{@data[idx] > other_ma.data[idx]}"
+            end
+          end
+        end
+
         (1..count).all? do |i|
           idx = @data.length - i
           idx >= 0 && @data[idx] > other_ma.data[idx]

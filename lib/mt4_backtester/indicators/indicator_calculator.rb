@@ -52,10 +52,10 @@ module MT4Backtester
         end
       end
 
-      # 前回値を取得
-      def previous_value(name)
+      # 前回値を取得（ステップ数指定可能）
+      def previous_value(name, steps_back = 1)
         return nil unless @indicators[name]
-        @indicators[name].previous_value
+        @indicators[name].value(steps_back)
       end
       
       # 移動平均クロスオーバーの確認（Trevian方式）
@@ -64,14 +64,32 @@ module MT4Backtester
         slow_ma = @indicators[slow_ma_name]
         
         return :none if fast_ma.nil? || slow_ma.nil?
+
+        # 現在の値を取得
+        current_fast = fast_ma.current_value
+        current_slow = slow_ma.current_value
         
-        # Trevianのロジック: 現在と前回の両方でFastMAがSlowMAの上にある場合は買い
-        if fast_ma.above?(slow_ma, 2)
-          return :buy
-        else
-          return :sell  # Trevianでは他のケースは全て売り
+        # 前回の値を取得
+        prev_fast = fast_ma.previous_value
+        prev_slow = slow_ma.previous_value
+
+        # デバッグ出力
+        if @debug_mode
+          puts "現在 FastMA: #{current_fast}, SlowMA: #{current_slow}"
+          puts "前回 FastMA: #{prev_fast}, SlowMA: #{prev_slow}"
         end
+
+        # クロスオーバー検出（原MQL4コードに忠実に）
+        if current_fast > current_slow && prev_fast > prev_slow
+          return :buy
+        elsif current_fast < current_slow && prev_fast < prev_slow
+          return :sell
+        else
+          return :none  # 明確なシグナルがない場合
+        end
+
       end
+
     end
   end
 end

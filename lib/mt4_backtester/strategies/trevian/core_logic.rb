@@ -181,12 +181,6 @@ module MT4Backtester
 
         # ティックデータに対して戦略を適用
         def process_tick(tick, account_info)
-          # 日時表示
-          #puts "処理日時: #{tick[:time]}"
-          # エントリー条件チェック
-          #entry_signal = check_entry_conditions(tick)
-          #puts "エントリーシグナル: #{entry_signal}, ポジション数: #{@positions.size}"
-
           # アカウント情報の更新
           @account_info = account_info
           update_account_info(account_info)
@@ -210,7 +204,14 @@ module MT4Backtester
           # 以下は既存コード
           # エントリーポイント判定
           entry_signal = check_entry_conditions(tick)
-          
+
+          if @debug_mode
+            # 日時表示
+              puts "処理日時: #{tick[:time]}"
+            # エントリー条件チェック
+              puts "エントリーシグナル: #{entry_signal}, ポジション数: #{@positions.size}"
+          end 
+
           # 新規エントリー
           if @positions.empty? && entry_signal != :none
             open_position(tick, entry_signal)
@@ -306,13 +307,36 @@ module MT4Backtester
         def determine_trend
           # trend_hantei == 3 の場合（移動平均クロスオーバー）
           return :none if @candles.length < 15  # 十分なデータがない場合
-          
           # 移動平均クロスオーバーによる判定
           ma_signal = @indicator_calculator.ma_crossover_check(:fast_ma, :slow_ma)
           
           # デバッグ出力（必要に応じて）
           #puts "MA Signal: #{ma_signal}, Fast MA: #{@indicator_calculator.value(:fast_ma)}, Slow MA: #{@indicator_calculator.value(:slow_ma)}"
-          
+
+  # デバッグ出力
+  if @debug_mode
+    puts "日時: #{@candles.last[:time]}"
+    puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
+    puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
+    puts "シグナル: #{ma_signal}"
+  end
+
+  # デバッグ情報の追加 - ここから
+  if @candles.last && @debug_mode
+    current_time = @candles.last[:time]
+    if current_time.month == 1 && current_time.day >= 10 && current_time.day <= 16
+      puts "  Signal: #{ma_signal}"
+      
+      # もし各ポジションの状態も確認したい場合は以下も追加
+      if @positions && !@positions.empty?
+        puts "  現在のポジション数: #{@positions.size}"
+        puts "  次の注文タイプ: #{@state[:next_order] == 1 ? '買い' : '売り'}"
+      end
+      puts "-------------------------------"
+    end
+  end
+  # デバッグ情報の追加 - ここまで
+
           return ma_signal
         end
         

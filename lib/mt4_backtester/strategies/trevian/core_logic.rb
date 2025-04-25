@@ -4,6 +4,7 @@ module MT4Backtester
       class CoreLogic
         # 戦略パラメータ
         attr_reader :params, :indicator_calculator
+        attr_accessor :logger
         
         def initialize(params = {}, debug_mode = false)
           # 環境変数から設定を読み込む
@@ -33,6 +34,7 @@ module MT4Backtester
           @positions = []
 
           @debug_mode = debug_mode
+          @logger = nil
 
           # 通貨ペアの設定
           set_spred_keisuu(params[:Symbol])
@@ -69,6 +71,21 @@ module MT4Backtester
             last_ticket: 0,
             last_lots: 0
           }
+        end
+        
+        def set_balance_update_callback(callback)
+          @on_balance_update = callback
+        end
+
+        def update_balance(profit)
+          old_balance = @account_info[:balance]
+          @account_info[:balance] += profit
+          
+          # デバッグ出力
+          puts "CoreLogic: 残高更新 #{old_balance} -> #{@account_info[:balance]}" if @debug_mode
+          
+          # アカウント情報への参照を保持している親クラスに通知
+          @on_balance_update.call(@account_info[:balance]) if @on_balance_update
         end
 
         # 通貨ペアに応じたSpredKeisuu設定
@@ -184,7 +201,7 @@ module MT4Backtester
           # アカウント情報の更新
           @account_info = account_info
           update_account_info(account_info)
-          
+
           # 時間制御確認
           time_control = check_time_control(tick)
           
@@ -198,33 +215,56 @@ module MT4Backtester
               # 金曜日や週末のポジション決済ロジックをここに実装
               # 実際のMT4版では金曜日の夜などに積極的な決済を行う
             end
-            return
+          else
+            # エントリーポイント判定
+            entry_signal = check_entry_conditions(tick)
+            # 新規エントリー
+            if @positions.empty? && entry_signal != :none
+              open_position(tick, entry_signal)
+            end
+            # 追加ポジション判定
+            check_additional_positions(tick)
           end
-          
-          # 以下は既存コード
-          # エントリーポイント判定
-          entry_signal = check_entry_conditions(tick)
 
-          if @debug_mode
-            # 日時表示
-              puts "処理日時: #{tick[:time]}"
-            # エントリー条件チェック
-              puts "エントリーシグナル: #{entry_signal}, ポジション数: #{@positions.size}"
-          end 
-
-          # 新規エントリー
-          if @positions.empty? && entry_signal != :none
-            open_position(tick, entry_signal)
-          end
-          
-          # 追加ポジション判定
-          check_additional_positions(tick)
-          
           # トレーリングストップ管理
           manage_trailing_stop(tick) if @state[:trailing_stop_flag] == 1
           
           # ロスカット判定
           check_loss_cut(tick)
+          # 指標データの準備（ログ出力用）
+          prepare_indicators(tick) if @indicator_calculator.nil?
+          
+          # ログ出力（ロガーがセットされている場合）- 全ての処理が終わった後に実行
+          if @logger
+            # インジケーターの値を取得
+            indicators = {}
+            if @indicator_calculator
+              indicators[:fast_ma] = @indicator_calculator.value(:fast_ma)
+              indicators[:slow_ma] = @indicator_calculator.value(:slow_ma)
+            end
+            
+            # 最新の状態情報
+            state = @state.merge(close_flag: @close_flag || 0)
+            
+            # ログ出力 - 最新のアカウント情報を使用
+            @logger.log(tick, indicators, state, @account_info)
+          end
+
+          if @debug_mode
+           puts "====== #{tick[:time]} の状態 ======"
+            puts "価格: #{tick[:close]}, MA5: #{@indicator_calculator.value(:fast_ma)}, MA14: #{@indicator_calculator.value(:slow_ma)}"
+            puts "シグナル: #{entry_signal}, close_flag: #{@close_flag}, trailing_stop_flag: #{@state[:trailing_stop_flag]}"
+            puts "ポジション数: #{@positions.size}, 口座残高: #{@account_info[:balance]}"
+            
+            if @positions.size > 0
+              puts "ポジション詳細:"
+              @positions.each_with_index do |pos, idx|
+                puts "  #{idx+1}: #{pos[:type]} @ #{pos[:open_price]} (lot: #{pos[:lot_size]})"
+              end
+            end
+            puts "============================="
+          end
+
         end
         
         # アカウント情報の更新
@@ -315,10 +355,10 @@ module MT4Backtester
 
   # デバッグ出力
   if @debug_mode
-    puts "日時: #{@candles.last[:time]}"
-    puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
-    puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
-    puts "シグナル: #{ma_signal}"
+    #puts "日時: #{@candles.last[:time]}"
+    #puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
+    #puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
+    #puts "シグナル: #{ma_signal}"
   end
 
   # デバッグ情報の追加 - ここから
@@ -556,7 +596,7 @@ module MT4Backtester
             next_lot = @positions.first[:lot_size] * @params[:next_order_keisu] + @params[:keisu_pulus_pips]
             
             # デバッグ出力
-            puts "次のロット計算(初回): #{@positions.first[:lot_size]} * #{@params[:next_order_keisu]} + #{@params[:keisu_pulus_pips]} = #{next_lot}" if @debug_mode
+            #puts "次のロット計算(初回): #{@positions.first[:lot_size]} * #{@params[:next_order_keisu]} + #{@params[:keisu_pulus_pips]} = #{next_lot}" if @debug_mode
           else
             # 2回目以降の追加ポジション
             last_pos = @positions.last
@@ -598,13 +638,13 @@ module MT4Backtester
               @state[:buy_rate] = @state[:sell_rate] + (rate_gap * gap_adjust_rate)
               
               # デバッグ出力
-              puts "Gap調整(買い): 元レート #{@state[:buy_rate] - (rate_gap * gap_adjust_rate)} → 新レート #{@state[:buy_rate]}" if @debug_mode
+              #puts "Gap調整(買い): 元レート #{@state[:buy_rate] - (rate_gap * gap_adjust_rate)} → 新レート #{@state[:buy_rate]}" if @debug_mode
             when 2  # 次は売り
               rate_gap = @state[:buy_rate] - @state[:sell_rate]
               @state[:sell_rate] = @state[:buy_rate] - (rate_gap * gap_adjust_rate)
               
               # デバッグ出力
-              puts "Gap調整(売り): 元レート #{@state[:sell_rate] + (rate_gap * gap_adjust_rate)} → 新レート #{@state[:sell_rate]}" if @debug_mode
+              #puts "Gap調整(売り): 元レート #{@state[:sell_rate] + (rate_gap * gap_adjust_rate)} → 新レート #{@state[:sell_rate]}" if @debug_mode
             end
             
             # Profit_down_Percentを反映したprofitの計算も行う
@@ -689,6 +729,8 @@ module MT4Backtester
         # ポジションのクローズ
         def close_position(position, tick, profit = nil)
           profit ||= calculate_position_profit(position, tick)
+          old_balance = @account_info[:balance]  # 更新前の残高を記録
+          update_balance(profit)
 
           # 決済理由を追加
           exit_reason = get_exit_reason(position, tick)
@@ -702,7 +744,17 @@ module MT4Backtester
 
           @orders << trade
           @total_profit += profit
-          
+          # アカウント情報の残高を更新
+          @account_info[:balance] += profit
+
+  # 残高更新のデバッグ出力
+  puts "===== ポジション決済 ====="
+  puts "時間: #{tick[:time]}"
+  puts "ポジションタイプ: #{position[:type]}"
+  puts "利益: #{profit}"
+  puts "残高更新: #{old_balance} -> #{@account_info[:balance]}"
+  puts "=========================="
+
           # 最大ドローダウン更新
           update_max_drawdown
         end
@@ -857,10 +909,10 @@ module MT4Backtester
             # 福利計算による損失閾値の調整
             loss_cut_profit = @params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1))
             
-            puts "総損益: #{total_profit}, ロスカット閾値: #{loss_cut_profit}" if @debug_mode
+            #puts "総損益: #{total_profit}, ロスカット閾値: #{loss_cut_profit}" if @debug_mode
             
             if total_profit < loss_cut_profit
-              puts "ロスカット発動! 総ポジション数: #{@positions.size}, 総損益: #{total_profit}" if @debug_mode
+              #puts "ロスカット発動! 総ポジション数: #{@positions.size}, 総損益: #{total_profit}" if @debug_mode
               
               # すべてのポジションをクローズ
               all_delete(tick)

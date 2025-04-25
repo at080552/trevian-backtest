@@ -2,17 +2,28 @@ module MT4Backtester
   module Core
     class Backtester
       attr_reader :results, :strategy, :tick_data
+      attr_accessor :logger_path
       
       def initialize(strategy, tick_data)
         @strategy = strategy
         @tick_data = tick_data
         @results = nil
+        @logger_path = nil  # ロガーの出力先パス
       end
       
       def run
         puts "バックテスト実行開始"
         puts "ティックデータ数: #{@tick_data.size}"
-        
+
+        # ロガーの設定（パスが指定されている場合）
+        if @logger_path && @strategy.respond_to?(:core_logic) && @strategy.core_logic.respond_to?(:logger=)
+          require_relative '../logging/csv_logger'
+          logger = MT4Backtester::Logging::CsvLogger.new(@logger_path)
+          logger.open
+          @strategy.core_logic.logger = logger
+          puts "ログ出力を有効化: #{@logger_path}"
+        end
+
         start_time = Time.now
         
         # 戦略を実行
@@ -22,7 +33,12 @@ module MT4Backtester
         
         end_time = Time.now
         puts "バックテスト実行時間: #{(end_time - start_time).round(2)}秒"
-        
+
+        # ロガーを閉じる
+        if @strategy.respond_to?(:core_logic) && @strategy.core_logic.respond_to?(:logger) && @strategy.core_logic.logger
+          @strategy.core_logic.logger.close
+        end
+
         # 戦略の結果を後処理
         post_process_results
         

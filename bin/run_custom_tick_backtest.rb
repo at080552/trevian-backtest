@@ -19,7 +19,8 @@ options = {
   debug_mode: false,
   gap: env_params[:Gap],
   takeprofit: env_params[:Takeprofit],
-  start_lots: env_params[:Start_Lots]
+  start_lots: env_params[:Start_Lots],
+  log_file: nil  # ログファイルのパスを追加
 }
 
 OptionParser.new do |opts|
@@ -60,7 +61,11 @@ OptionParser.new do |opts|
   opts.on("-v", "--verbose", "詳細な出力を表示") do
     options[:debug_mode] = true
   end
-  
+
+  opts.on("-l", "--log FILE", "ログ出力ファイルのパス") do |file|
+    options[:log_file] = file
+  end
+
   opts.on("-h", "--help", "ヘルプの表示") do
     puts opts
     exit
@@ -158,6 +163,8 @@ puts "\nバックテストを実行中..."
 strategy = MT4Backtester::Strategies::TrevianStrategy.new(params, options[:debug_mode])
 backtester = MT4Backtester::Core::Backtester.new(strategy, tick_data)
 
+# ロガーパスを設定
+backtester.logger_path = options[:log_file] if options[:log_file]
 # バックテスト実行
 results = backtester.run
 

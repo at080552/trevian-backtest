@@ -14,6 +14,13 @@ module MT4Backtester
           
         @debug_mode = debug_mode
         @core_logic = Trevian::CoreLogic.new(@params, debug_mode)
+
+        # 残高更新コールバックを設定
+        @core_logic.set_balance_update_callback(->(balance) {
+          @account[:balance] = balance
+          puts "TrevianStrategy: 残高を更新 -> #{balance}" if debug_mode
+        })
+
         @results = nil
         @account = {
           balance: @params[:Start_Sikin] || 300,

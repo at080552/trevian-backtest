@@ -6,3 +6,4 @@
 /data/samples/*.csv
 /data/histdata/*.csv
 .env
+.DS_Store

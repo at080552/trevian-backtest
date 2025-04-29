@@ -165,13 +165,20 @@ module MT4Backtester
           # 曜日と時間を取得
           day_of_week = time.wday  # 0=日曜, 1=月曜, ..., 6=土曜
           hour = time.hour
+          #puts "#{time}"
+          #puts "day_of_week: #{day_of_week}"
+          #puts "day_of_week_class: #{day_of_week.class.inspect}"
+          #puts "hour: #{hour}"
+          #puts "hour_class: #{hour.class.inspect}"
           
           # 状態を保持する変数
           @close_flag ||= 0
           
           # 金曜日(5)の場合
           if day_of_week == 5 && hour >= 20
+            #puts "-B #{@close_flag}"
             @close_flag = 1 if @close_flag == 0
+            #puts "-A #{@close_flag}"
           end
           
           # 土曜日(6)の場合
@@ -192,7 +199,10 @@ module MT4Backtester
           if day_of_week >= 2 && day_of_week <= 4
             @close_flag = 0 if @close_flag == 1
           end
-          
+          if @close_flag == 1
+            #raise tick.inspect
+          end
+          #puts "@close_flag #{@close_flag}"
           return @close_flag
         end
 
@@ -204,7 +214,6 @@ module MT4Backtester
 
           # 時間制御確認
           time_control = check_time_control(tick)
-          
           # ポジション管理（常に実行）
           manage_positions(tick)
           
@@ -959,7 +968,46 @@ module MT4Backtester
         def generate_ticket_id
           Time.now.to_i + rand(1000)
         end
-        
+
+
+        # 現在のポジション情報を取得するメソッド
+        def get_positions
+          # 直接@positionsを返す
+          @positions
+        end
+
+        # 結果取得メソッドの拡張版
+        def get_results
+          total_profit = @orders.sum { |o| o[:profit] || 0 }
+          winning_trades = @orders.count { |o| o[:profit] && o[:profit] > 0 }
+          losing_trades = @orders.count { |o| o[:profit] && o[:profit] <= 0 }
+          
+          # 資金効率を計算
+          initial_balance = @params[:Start_Sikin] || 300
+          profit_factor = 0
+          
+          # プロフィットファクターの計算
+          if winning_trades > 0 && losing_trades > 0
+            winning_sum = @orders.select { |o| o[:profit] && o[:profit] > 0 }.sum { |o| o[:profit] }
+            losing_sum = @orders.select { |o| o[:profit] && o[:profit] <= 0 }.sum { |o| o[:profit] }.abs
+            profit_factor = losing_sum > 0 ? (winning_sum / losing_sum).round(2) : winning_sum > 0 ? Float::INFINITY : 0
+          end
+          
+          # 期待値の計算
+          expected_payoff = @orders.size > 0 ? (total_profit / @orders.size).round(2) : 0
+          
+          {
+            total_trades: @orders.size,
+            winning_trades: winning_trades,
+            losing_trades: losing_trades,
+            total_profit: total_profit,
+            max_drawdown: @max_drawdown,
+            profit_factor: profit_factor,
+            expected_payoff: expected_payoff,
+            trades: @orders
+          }
+        end
+
         # 結果の取得
         def get_results
           {

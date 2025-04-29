@@ -14,24 +14,18 @@ module MT4Backtester
           
         @debug_mode = debug_mode
         @core_logic = Trevian::CoreLogic.new(@params, debug_mode)
-
-        # 残高更新コールバックを設定
-        @core_logic.set_balance_update_callback(->(balance) {
-          @account[:balance] = balance
-          puts "TrevianStrategy: 残高を更新 -> #{balance}" if debug_mode
-        })
-
         @results = nil
         @account = {
           balance: @params[:Start_Sikin] || 300,
           equity: @params[:Start_Sikin] || 300,
-          margin: 0
-          }
+          margin: 0,
+          free_margin: @params[:Start_Sikin] || 300
+        }
         @indicators_data = {
           ma_fast: [],
           ma_slow: [],
           momentum: []
-          }
+        }
       end
 
       def get_indicators_data
@@ -50,10 +44,109 @@ module MT4Backtester
         @results = @core_logic.get_results
         @results[:params] = @params
         
+        # 取引情報に口座残高情報を追加
+        enhance_trade_records
+        
         @results
       end
       
       private
+      
+      def enhance_trade_records
+        # 取引データがない場合は処理しない
+        return unless @results[:trades] && !@results[:trades].empty?
+        
+        initial_balance = @params[:Start_Sikin] || 300
+        running_balance = initial_balance
+        
+        @results[:trades].each_with_index do |trade, index|
+          # エントリー情報の追加
+          trade[:entry_balance] = running_balance
+          trade[:entry_equity] = running_balance
+          trade[:entry_margin] = calculate_margin(trade[:lot_size], trade[:open_price])
+          trade[:entry_free_margin] = running_balance - trade[:entry_margin]
+          
+          # 決済後の残高計算
+          running_balance += trade[:profit]
+          
+          # 決済情報の追加
+          trade[:exit_balance] = running_balance
+          trade[:exit_equity] = running_balance
+          trade[:exit_margin] = 0  # 決済後はポジションがないので0
+          trade[:exit_free_margin] = running_balance
+          
+          # トレード理由が設定されていない場合のデフォルト値
+          if !trade[:reason] || trade[:reason].empty?
+            trade[:reason] = get_default_entry_reason(trade)
+          end
+          
+          if !trade[:exit_reason] || trade[:exit_reason].empty?
+            trade[:exit_reason] = get_default_exit_reason(trade)
+          end
+          
+          # 複数のトレードがある場合、相互に関連付け
+          if index > 0
+            prev_trade = @results[:trades][index - 1]
+            trade[:previous_trade_profit] = prev_trade[:profit]
+            
+            # 連続したトレードの場合は理由を追加
+            if (trade[:open_time] - prev_trade[:close_time]) < 300 # 5分以内に続いたトレード
+              if prev_trade[:profit] < 0
+                trade[:reason] = "#{trade[:reason]} (前回トレード: 損失 $#{prev_trade[:profit].round(2)})"
+              else
+                trade[:reason] = "#{trade[:reason]} (前回トレード: 利益 $#{prev_trade[:profit].round(2)})"
+              end
+            end
+          end
+        end
+      end
+      
+      def calculate_margin(lot_size, price)
+        # マージン計算のシンプルな例（実際にはもっと複雑）
+        # 例: 1ロット = 100,000通貨単位、レバレッジ100倍の場合
+        contract_size = 100000
+        leverage = @params[:leverage] || 100
+        
+        (lot_size * contract_size * price) / leverage
+      end
+      
+      def get_default_entry_reason(trade)
+        type = trade[:type].to_s == "buy" ? "買い" : "売り"
+        
+        # MA値がある場合はそれを含める
+        if @core_logic.indicator_calculator
+          fast_ma = @core_logic.indicator_calculator.value(:fast_ma)
+          slow_ma = @core_logic.indicator_calculator.value(:slow_ma)
+          
+          if fast_ma && slow_ma
+            if trade[:type].to_s == "buy" && fast_ma > slow_ma
+              return "MA(5)がMA(14)を上回ったため - 買い"
+            elsif trade[:type].to_s == "sell" && fast_ma < slow_ma
+              return "MA(5)がMA(14)を下回ったため - 売り"
+            end
+          end
+        end
+        
+        "トレンド判断: #{type}"
+      end
+      
+      def get_default_exit_reason(trade)
+        profit = trade[:profit]
+        
+        if profit > 0
+          # 利益確定
+          return "利益確定 +$#{profit.round(2)}"
+        elsif profit < -50
+          # 大きな損失
+          return "大きな損失 $#{profit.round(2)}"
+        elsif profit < 0
+          # 小さな損失
+          return "損失 $#{profit.round(2)}"
+        else
+          # 損益ゼロ
+          return "決済"
+        end
+      end
       
       def process_tick_data(tick_data)
         # テクニカル指標データの準備
@@ -133,9 +226,30 @@ module MT4Backtester
         
         # 簡易実装
         open_positions_pnl = 0
+        required_margin = 0
+        
+        # コアロジックから現在のポジション情報を取得
+        if @core_logic.respond_to?(:get_positions)
+          positions = @core_logic.get_positions
+          
+          # ポジションがある場合、未確定損益と必要証拠金を計算
+          positions.each do |pos|
+            # 未確定損益（浮動利益）計算
+            if pos[:type] == :buy
+              open_positions_pnl += (tick[:close] - pos[:open_price]) * pos[:lot_size] * 100000
+            else
+              open_positions_pnl += (pos[:open_price] - tick[:close]) * pos[:lot_size] * 100000
+            end
+            
+            # 必要証拠金計算
+            required_margin += calculate_margin(pos[:lot_size], tick[:close])
+          end
+        end
         
         # アカウント残高更新
         @account[:equity] = @account[:balance] + open_positions_pnl
+        @account[:margin] = required_margin
+        @account[:free_margin] = @account[:equity] - @account[:margin]
       end
     end
   end

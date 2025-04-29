@@ -14,13 +14,24 @@ module MT4Backtester
           format: :auto,  # auto, tick, m1, specific, mt4tick
           has_header: false, # ヘッダー行の有無
           date_format: '%Y.%m.%d', # 日付フォーマット
-          delimiter: ',' # 区切り文字
+          delimiter: ',', # 区切り文字
+          timezone_offset: 0, # タイムゾーン調整（時間単位）
+          convert_to_jst: false # 日本時間への変換フラグ
         }
         
         # オプションのマージ
         opts = default_options.merge(options)
         
+        # 日本時間への変換フラグが設定されている場合
+        if opts[:convert_to_jst]
+          # HistDataはEST（UTC-5）固定なので、日本時間（UTC+9）への変換は+14時間
+          opts[:timezone_offset] = 14
+        end
+        
         puts "HistData.comのデータを読み込んでいます: #{file_path}"
+        if opts[:timezone_offset] != 0
+          puts "タイムゾーン調整: #{opts[:timezone_offset]}時間"
+        end
         
         begin
           @data = []
@@ -60,6 +71,9 @@ module MT4Backtester
               opts[:format] = :m1
             elsif first_line.count(',') == 4  # Bid/Ask形式
               opts[:format] = :tick
+            elsif first_line =~ /^\d{4}\.\d{2}\.\d{2},\d{2}:\d{2},/
+              # HistDataの独自フォーマット検出
+              opts[:format] = :specific
             end
           end
           
@@ -89,6 +103,8 @@ module MT4Backtester
               
               begin
                 tick_time = Time.strptime(datetime_str, '%Y%m%d %H%M%S%L')
+                # タイムゾーン調整
+                tick_time += opts[:timezone_offset] * 3600 if opts[:timezone_offset] != 0
               rescue => e
                 puts "時間解析エラー: #{e.message} - #{datetime_str}"
                 next
@@ -122,6 +138,8 @@ module MT4Backtester
               
               begin
                 tick_time = Time.strptime(datetime_str, '%Y%m%d %H%M%S%L')
+                # タイムゾーン調整
+                tick_time += opts[:timezone_offset] * 3600 if opts[:timezone_offset] != 0
               rescue => e
                 puts "時間解析エラー: #{e.message} - #{datetime_str}"
                 next
@@ -151,6 +169,8 @@ module MT4Backtester
               
               begin
                 tick_time = Time.strptime(datetime_str, "#{opts[:date_format]} %H:%M")
+                # タイムゾーン調整
+                tick_time += opts[:timezone_offset] * 3600 if opts[:timezone_offset] != 0
               rescue => e
                 puts "時間解析エラー: #{e.message} - #{datetime_str}"
                 next
@@ -179,6 +199,8 @@ module MT4Backtester
               
               begin
                 tick_time = Time.strptime(datetime_str, "#{opts[:date_format]} %H:%M")
+                # タイムゾーン調整
+                tick_time += opts[:timezone_offset] * 3600 if opts[:timezone_offset] != 0
               rescue => e
                 puts "時間解析エラー: #{e.message} - #{datetime_str} - #{opts[:date_format]}"
                 next
@@ -213,10 +235,14 @@ module MT4Backtester
                 
                 begin
                   tick_time = Time.strptime(datetime_str, '%Y%m%d %H%M%S%L')
+                  # タイムゾーン調整
+                  tick_time += opts[:timezone_offset] * 3600 if opts[:timezone_offset] != 0
                 rescue => e
                   # 別の形式を試す
                   begin
                     tick_time = Time.parse(datetime_str)
+                    # タイムゾーン調整
+                    tick_time += opts[:timezone_offset] * 3600 if opts[:timezone_offset] != 0
                   rescue => e2
                     puts "時間解析エラー: #{e2.message} - #{datetime_str}"
                     next
@@ -244,6 +270,9 @@ module MT4Backtester
           @data.sort_by! { |tick| tick[:time] }
           
           puts "#{@data.size}ティックの読み込みに成功しました。"
+          if @data.size > 0
+            puts "データ範囲: #{@data.first[:time]} から #{@data.last[:time]}"
+          end
         rescue => e
           puts "HistData読み込み中にエラーが発生しました: #{e.message}"
           puts e.backtrace

@@ -90,7 +90,9 @@ module MT4Backtester
           time: @tick_data.first[:time].strftime('%Y-%m-%d %H:%M'),
           balance: balance,
           equity: balance,
-          drawdown: 0
+          drawdown: 0,
+          margin: 0,
+          free_margin: balance
         }
         
         # 各トレードの結果を反映
@@ -106,12 +108,18 @@ module MT4Backtester
           # ドローダウンの計算
           drawdown = max_balance - balance
           
+          # マージン情報（トレードに含まれていればそれを使用）
+          margin = trade[:margin] || 0
+          free_margin = balance - margin
+          
           # エクイティカーブにポイント追加
           @equity_curve << {
             time: trade[:close_time].strftime('%Y-%m-%d %H:%M'),
             balance: balance,
             equity: balance,
-            drawdown: drawdown
+            drawdown: drawdown,
+            margin: margin,
+            free_margin: free_margin
           }
         end
         
@@ -121,7 +129,9 @@ module MT4Backtester
             time: @tick_data.last[:time].strftime('%Y-%m-%d %H:%M'),
             balance: initial_balance,
             equity: initial_balance,
-            drawdown: 0
+            drawdown: 0,
+            margin: 0,
+            free_margin: initial_balance
           }
         end
       end
@@ -131,31 +141,39 @@ module MT4Backtester
         
         @results[:trades].each do |trade|
           # エントリーポイント
-          @trade_points << {
+          entry_point = {
             time: trade[:open_time].strftime('%Y-%m-%d %H:%M'),
             price: trade[:open_price],
             type: trade[:type].to_s,
             action: 'entry',
             lot: trade[:lot_size],
-            reason: trade[:reason] || "エントリー"
+            reason: trade[:reason] || "エントリー", # エントリー理由
+            account_balance: trade[:entry_balance] || nil, # エントリー時の口座残高
+            account_equity: trade[:entry_equity] || nil, # エントリー時のエクイティ
+            margin: trade[:entry_margin] || nil # エントリー時の必要証拠金
           }
           
           # 決済ポイント
-          @trade_points << {
+          exit_point = {
             time: trade[:close_time].strftime('%Y-%m-%d %H:%M'),
             price: trade[:close_price],
             type: trade[:type].to_s,
             action: 'exit',
             lot: trade[:lot_size],
             profit: trade[:profit],
-            reason: trade[:exit_reason] || "決済"
+            reason: trade[:exit_reason] || "決済", # 決済理由
+            account_balance: trade[:exit_balance] || nil, # 決済後の口座残高
+            account_equity: trade[:exit_equity] || nil, # 決済時のエクイティ
+            margin: trade[:exit_margin] || nil # 決済時の必要証拠金
           }
+          
+          @trade_points << entry_point
+          @trade_points << exit_point
         end
         
         # 時間順にソート
         @trade_points.sort_by! { |point| point[:time] }
       end
-
     end
   end
 end

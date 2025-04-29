@@ -802,6 +802,7 @@ module MT4Backtester
             close_time: tick[:time],
             close_price: tick[:close],
             profit: profit,
+            position_count: @positions.size,  # ポジション数を追加
             exit_reason: exit_reason  # 決済理由を追加
           )
 
@@ -810,14 +811,15 @@ module MT4Backtester
           # アカウント情報の残高を更新
           @account_info[:balance] += profit
 
+  if @debug_mode
   # 残高更新のデバッグ出力
-  puts "===== ポジション決済 ====="
-  puts "時間: #{tick[:time]}"
-  puts "ポジションタイプ: #{position[:type]}"
-  puts "利益: #{profit}"
-  puts "残高更新: #{old_balance} -> #{@account_info[:balance]}"
-  puts "=========================="
-
+    puts "===== ポジション決済 ====="
+    puts "時間: #{tick[:time]}"
+    puts "ポジションタイプ: #{position[:type]}"
+    puts "利益: #{profit}"
+    puts "残高更新: #{old_balance} -> #{@account_info[:balance]}"
+    puts "=========================="
+  end
           # 最大ドローダウン更新
           update_max_drawdown
         end

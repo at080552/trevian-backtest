@@ -222,6 +222,26 @@ module MT4Backtester
           @account_info = account_info
           update_account_info(account_info)
 
+        # EA_Stopチェック（手動停止）
+        if @params[:EA_Stop] == 1
+          @close_flag = 1
+        elsif @params[:EA_Stop] == 2
+          @close_flag = 0
+          @params[:EA_Stop] = 0
+        end
+        
+        # close_flagが立っている場合にポジションを閉じる
+        if @close_flag == 1 && !@positions.empty?
+          all_delete(tick)
+          return
+        end
+
+          # トレーリングストップが有効な場合は、他の処理より優先して実行
+          if @state[:trailing_stop_flag] == 1
+            manage_trailing_stop(tick)
+            return if @positions.empty?  # ポジションがすべて閉じられた場合は終了
+          end
+
           # 時間制御確認
           time_control = check_time_control(tick)
           # ポジション管理（常に実行）
@@ -233,6 +253,7 @@ module MT4Backtester
             if !@positions.empty?
               # 金曜日や週末のポジション決済ロジックをここに実装
               # 実際のMT4版では金曜日の夜などに積極的な決済を行う
+              all_delete(tick)
             end
           else
             # エントリーポイント判定
@@ -762,8 +783,10 @@ module MT4Backtester
         # 最も利益の出ているポジションを探す
         def find_most_profitable_position(tick)
           return nil if @positions.empty?
-          
-          @positions.max_by { |pos| calculate_position_profit(pos, tick) }
+          #最も利益の大きいポジション
+          #@positions.max_by { |pos| calculate_position_profit(pos, tick) }
+          # 最大ロットのポジションを探す（MT4との一致を図る）
+          @positions.max_by { |pos| pos[:lot_size] }
         end
         
         # ポジションのクローズ
@@ -807,9 +830,10 @@ module MT4Backtester
           # トレーリングが有効でポジションがない場合は状態をリセット
           if @positions.empty?
             @state[:trailing_stop_flag] = 0
+            all_delete(tick)  # 明示的に all_delete を呼ぶ
             return
           end
-          
+
           position = @positions.first
           price = tick[:close]
           pip_value = pips  # Pips関数で計算した値
@@ -842,9 +866,9 @@ module MT4Backtester
               close_position(position, tick)
               @positions.clear
               @state[:trailing_stop_flag] = 0
+              all_delete(tick)  # 明示的に all_delete を呼ぶ
               puts "Buy: ストップロスヒット" if @debug_mode
             end
-            
           elsif position[:type] == :sell
             # 売りポジションのトレーリングストップ
             if position[:stop_loss].nil? || position[:stop_loss] > position[:open_price]
@@ -873,6 +897,7 @@ module MT4Backtester
               close_position(position, tick)
               @positions.clear
               @state[:trailing_stop_flag] = 0
+              all_delete(tick)  # 明示的に all_delete を呼ぶ
               puts "Sell: ストップロスヒット" if @debug_mode
             end
           end
@@ -974,11 +999,31 @@ module MT4Backtester
           
           # ポジションをクリアし、状態をリセット
           @positions = []
+          # 状態の完全リセット（MT4の実装に合わせる）
+          @state[:orders] = 0
+          @state[:buy_orders] = 0
+          @state[:sell_orders] = 0
+          @state[:limit_orders] = 0
+          @state[:limit_buy_orders] = 0
+          @state[:limit_sell_orders] = 0
+          @state[:total_orders] = 0
+
+          @state[:order_jyotai] = 0
           @state[:first_order] = 0
           @state[:next_order] = 0
-          @state[:trailing_stop_flag] = 0
           @state[:first_rate] = 0
           @state[:order_rate] = 0
+          @state[:first_lots] = 0
+
+          @state[:buy_rate] = 0
+          @state[:sell_rate] = 0
+
+          @state[:all_lots] = 0
+          @state[:all_position] = 0
+
+          @state[:trailing_stop_flag] = 0
+          @state[:last_ticket] = 0
+          @state[:last_lots] = 0
           
           # ロスカットフラグをリセット
           @all_delete_flag = 0

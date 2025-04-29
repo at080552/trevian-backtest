@@ -59,7 +59,34 @@ module MT4Backtester
         initial_balance = @params[:Start_Sikin] || 300
         running_balance = initial_balance
         
+        # ポジション管理の初期化（通貨ペアごとに管理）
+        active_positions = {}
+        
+        # 時間順にソート（念のため）
+        @results[:trades].sort_by! { |t| t[:open_time] }
+        
         @results[:trades].each_with_index do |trade, index|
+          symbol = trade[:symbol] || 'GBPUSD' # シンボルがなければデフォルト値
+          
+          # 通貨ペアごとのポジション管理
+          active_positions[symbol] ||= []
+          
+          # エントリー前のポジション数を記録
+          trade[:entry_positions_count] = active_positions[symbol].size
+          
+          # ポジションリストに追加
+          position_info = {
+            id: trade[:ticket] || "pos_#{index}",
+            type: trade[:type],
+            lot: trade[:lot_size],
+            open_time: trade[:open_time],
+            open_price: trade[:open_price]
+          }
+          active_positions[symbol] << position_info
+          
+          # エントリー後のポジション数を更新（自分自身を含む）
+          trade[:entry_positions_count_after] = active_positions[symbol].size
+          
           # エントリー情報の追加
           trade[:entry_balance] = running_balance
           trade[:entry_equity] = running_balance
@@ -69,11 +96,22 @@ module MT4Backtester
           # 決済後の残高計算
           running_balance += trade[:profit]
           
+          # 決済時のポジション管理（自分を除外）
+          # このトレードを見つけて除外
+          active_positions[symbol].reject! { |p| 
+            p[:id] == (trade[:ticket] || "pos_#{index}") && 
+            p[:open_time] == trade[:open_time] && 
+            p[:type] == trade[:type]
+          }
+          
+          # 決済後のポジション数を記録
+          trade[:exit_positions_count] = active_positions[symbol].size
+          
           # 決済情報の追加
           trade[:exit_balance] = running_balance
           trade[:exit_equity] = running_balance
-          trade[:exit_margin] = 0  # 決済後はポジションがないので0
-          trade[:exit_free_margin] = running_balance
+          trade[:exit_margin] = calculate_total_margin(active_positions)
+          trade[:exit_free_margin] = running_balance - trade[:exit_margin]
           
           # トレード理由が設定されていない場合のデフォルト値
           if !trade[:reason] || trade[:reason].empty?
@@ -82,6 +120,11 @@ module MT4Backtester
           
           if !trade[:exit_reason] || trade[:exit_reason].empty?
             trade[:exit_reason] = get_default_exit_reason(trade)
+          end
+          
+          # エントリー理由に現在のポジション数を追加
+          if trade[:entry_positions_count] > 0
+            trade[:reason] = "#{trade[:reason]} (保有ポジション: #{trade[:entry_positions_count]})"
           end
           
           # 複数のトレードがある場合、相互に関連付け
@@ -99,6 +142,21 @@ module MT4Backtester
             end
           end
         end
+      end
+      
+      # 保有ポジション全体の必要証拠金を計算
+      def calculate_total_margin(active_positions)
+        total_margin = 0
+        
+        active_positions.each do |symbol, positions|
+          positions.each do |pos|
+            # 各ポジションの証拠金を計算して合計
+            pos_margin = calculate_margin(pos[:lot], pos[:open_price])
+            total_margin += pos_margin
+          end
+        end
+        
+        total_margin
       end
       
       def calculate_margin(lot_size, price)

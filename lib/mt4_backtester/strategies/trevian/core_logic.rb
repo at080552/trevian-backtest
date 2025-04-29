@@ -29,6 +29,7 @@ module MT4Backtester
           
           # 注文管理状態
           @orders = []
+          @orders_in_progress = []
           @total_profit = 0
           @max_drawdown = 0
           @positions = []
@@ -127,6 +128,15 @@ module MT4Backtester
             real_profit = profit - (spread * position[:lot_size])
             return real_profit
           end
+        end
+
+        # 証拠金計算用のヘルパーメソッド
+        def calculate_margin(lot_size, price)
+          # 1ロット = 100,000通貨単位、レバレッジ100倍の場合の簡易計算
+          contract_size = 100000
+          leverage = @params[:leverage] || 100
+          
+          (lot_size * contract_size * price) / leverage
         end
 
         # ポジションの利益計算
@@ -395,6 +405,7 @@ module MT4Backtester
           # エントリー理由を追加
           entry_reason = get_entry_reason(signal)
           
+          # ポジションを作成
           position = {
             ticket: generate_ticket_id,
             type: signal,
@@ -403,10 +414,26 @@ module MT4Backtester
             lot_size: lot_size,
             stop_loss: nil,
             take_profit: nil,
-            reason: entry_reason  # 理由を追加
+            reason: entry_reason,
+            # 追加情報
+            magic_number: @params[:MAGIC] || 8888,
+            symbol: @params[:Symbol] || 'GBPUSD',
+            # ポジション管理のための情報
+            entry_positions_count: @positions.size
           }
           
           @positions << position
+          
+          # トレード履歴に追加
+          trade_record = position.dup
+          # 決済情報は未定義
+          trade_record[:close_time] = nil
+          trade_record[:close_price] = nil
+          trade_record[:profit] = nil
+          trade_record[:exit_reason] = nil
+          
+          # トレード記録に追加
+          @orders_in_progress << trade_record
           
           if signal == :buy
             @state[:buy_rate] = position[:open_price]
@@ -420,8 +447,12 @@ module MT4Backtester
           
           # ポジション状態の更新
           update_position_state
+          
+          return position
         end
-        
+
+
+
         # ロットサイズの計算
         def calculate_lot_size
           # 極利計算によるロットサイズ
@@ -437,10 +468,10 @@ module MT4Backtester
           
           lot
         end
+
         
         # 最適ロット計算（Trevianのロジックを再現）
-# lib/mt4_backtester/strategies/trevian/core_logic.rb の calculate_optimal_lot メソッドを修正
-
+        # lib/mt4_backtester/strategies/trevian/core_logic.rb の calculate_optimal_lot メソッドを修正
       def calculate_optimal_lot(gap, profit, max_lot, positions)
         # Trevianのロットサイズ計算（極利計算）
         start_lot = 0.01
@@ -969,11 +1000,36 @@ module MT4Backtester
           Time.now.to_i + rand(1000)
         end
 
-
         # 現在のポジション情報を取得するメソッド
         def get_positions
-          # 直接@positionsを返す
-          @positions
+          # @positionsだけでなく、ポジションの詳細情報も返す
+          positions_with_details = @positions.map do |pos|
+            # 既存の情報を取得
+            {
+              ticket: pos[:ticket],
+              type: pos[:type],
+              lot_size: pos[:lot_size],
+              open_time: pos[:open_time],
+              open_price: pos[:open_price],
+              stop_loss: pos[:stop_loss],
+              take_profit: pos[:take_profit],
+              
+              # 追加情報
+              symbol: @params[:Symbol] || 'GBPUSD',  # シンボル
+              magic_number: @params[:MAGIC] || 8888,          # マジックナンバー
+              comment: pos[:type] == :buy ? "LONG" : "SHORT"  # コメント
+            }
+          end
+          
+          # ポジション数のログ出力（デバッグ用）
+          if @debug_mode
+            puts "現在のポジション数: #{@positions.size}"
+            @positions.each_with_index do |pos, idx|
+              puts "  ポジション #{idx+1}: #{pos[:type]} #{pos[:lot_size]}ロット @ #{pos[:open_price]}"
+            end
+          end
+          
+          positions_with_details
         end
 
         # 結果取得メソッドの拡張版

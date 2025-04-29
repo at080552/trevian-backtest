@@ -136,6 +136,7 @@ module MT4Backtester
         end
       end
       
+
       def process_trade_points
         return unless @results[:trades] && !@results[:trades].empty?
         
@@ -150,7 +151,8 @@ module MT4Backtester
             reason: trade[:reason] || "エントリー", # エントリー理由
             account_balance: trade[:entry_balance] || nil, # エントリー時の口座残高
             account_equity: trade[:entry_equity] || nil, # エントリー時のエクイティ
-            margin: trade[:entry_margin] || nil # エントリー時の必要証拠金
+            margin: trade[:entry_margin] || nil, # エントリー時の必要証拠金
+            positions_count: trade[:entry_positions_count] || nil # エントリー時のポジション数
           }
           
           # 決済ポイント
@@ -164,7 +166,8 @@ module MT4Backtester
             reason: trade[:exit_reason] || "決済", # 決済理由
             account_balance: trade[:exit_balance] || nil, # 決済後の口座残高
             account_equity: trade[:exit_equity] || nil, # 決済時のエクイティ
-            margin: trade[:exit_margin] || nil # 決済時の必要証拠金
+            margin: trade[:exit_margin] || nil, # 決済時の必要証拠金
+            positions_count: trade[:exit_positions_count] || nil # 決済後のポジション数
           }
           
           @trade_points << entry_point
@@ -174,6 +177,7 @@ module MT4Backtester
         # 時間順にソート
         @trade_points.sort_by! { |point| point[:time] }
       end
+
     end
   end
 end

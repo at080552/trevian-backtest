@@ -407,6 +407,9 @@ module MT4Backtester
             <th>決済時間</th>
             <th>決済価格</th>
             <th>利益</th>
+            <th>ポジション数</th>
+            <th>エントリー残高</th>
+            <th>決済後残高</th>
             <th>エントリー理由</th>
             <th>決済理由</th>
           </tr>
@@ -1035,6 +1038,13 @@ HTML
           entry_reason = entry[:reason] || '-'
           exit_reason = exit[:reason] || '-'
           
+          # 残高情報（あれば表示）
+          entry_balance = entry[:account_balance] ? format_number(entry[:account_balance]) : "-"
+          exit_balance = exit[:account_balance] ? format_number(exit[:account_balance]) : "-"
+          
+          # ポジション数情報（あれば表示）
+          positions_count = entry[:positions_count] || entry[:entry_positions_count] || "-"
+          
           rows_html += <<-HTML
         <tr class="trade-row">
           <td>#{i + 1}</td>
@@ -1045,6 +1055,9 @@ HTML
           <td>#{exit[:time]}</td>
           <td>#{format_number(exit[:price])}</td>
           <td class="#{profit_class}">$#{format_number(profit)}</td>
+          <td>#{positions_count}</td>
+          <td>$#{entry_balance}</td>
+          <td>$#{exit_balance}</td>
           <td>#{entry_reason}</td>
           <td>#{exit_reason}</td>
         </tr>

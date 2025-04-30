@@ -61,9 +61,36 @@ module MT4Backtester
         return nil unless @indicators[name]
         @indicators[name].value(steps_back)
       end
-      
-      # 移動平均クロスオーバーの確認（Trevian方式）
+
       def ma_crossover_check(fast_ma_name, slow_ma_name)
+        fast_ma = @indicators[fast_ma_name]
+        slow_ma = @indicators[slow_ma_name]
+        
+        return :sell if fast_ma.nil? || slow_ma.nil?
+      
+        # インデックス1と2の値を取得（MT4と同じ）
+        fast_ma1 = fast_ma.value(1)
+        fast_ma2 = fast_ma.value(2)
+        slow_ma1 = slow_ma.value(1)
+        slow_ma2 = slow_ma.value(2)
+
+        # データが揃っていなければデフォルト値を返す（初期データ不足の場合）
+        if fast_ma1.nil? || fast_ma2.nil? || slow_ma1.nil? || slow_ma2.nil?
+          # 履歴データが不足している場合は、デフォルトのシグナルを返す
+          # または十分なデータが揃うまで待つという選択も可能
+          return :sell  # または :buy か :sell をデフォルトとして返す
+        end
+
+        # MT4と完全に同一の条件判定
+        if fast_ma2 > slow_ma2 && fast_ma1 > slow_ma1
+          return :buy
+        else
+          return :sell
+        end
+      end
+
+      # 移動平均クロスオーバーの確認（Trevian方式）
+      def ma_crossover_check_org(fast_ma_name, slow_ma_name)
         fast_ma = @indicators[fast_ma_name]
         slow_ma = @indicators[slow_ma_name]
         

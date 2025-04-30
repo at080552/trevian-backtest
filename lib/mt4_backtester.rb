@@ -38,6 +38,7 @@ require_relative 'mt4_backtester/data/tick_data_factory'
 
 # インジケーターモジュール
 require_relative 'mt4_backtester/indicators/moving_average'
+require_relative 'mt4_backtester/indicators/mt4_compatible_ma'
 require_relative 'mt4_backtester/indicators/indicator_calculator'
 require_relative 'mt4_backtester/indicators/momentum'
 

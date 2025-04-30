@@ -331,9 +331,18 @@ module MT4Backtester
           if @indicator_calculator.nil?
             @indicator_calculator = MT4Backtester::Indicators::IndicatorCalculator.new
             
-            # Trevianで使用される移動平均を追加
-            @indicator_calculator.add_ma(:fast_ma, 5)  # 短期移動平均（5期間）
-            @indicator_calculator.add_ma(:slow_ma, 14) # 長期移動平均（14期間）
+            # Trevianで使用される移動平均を追加(旧コード)
+            #@indicator_calculator.add_ma(:fast_ma, 5)  # 短期移動平均（5期間）
+            #@indicator_calculator.add_ma(:slow_ma, 14) # 長期移動平均（14期間）
+            # 新しいMT4互換クラスを使用：
+            # MT4互換のMAクラスのインスタンスを作成
+            fast_ma = MT4Backtester::Indicators::MT4CompatibleMA.new(5, :sma, :close)
+            slow_ma = MT4Backtester::Indicators::MT4CompatibleMA.new(14, :sma, :close)
+            
+            # インジケーターとして追加
+            @indicator_calculator.add_indicator(:fast_ma, fast_ma)
+            @indicator_calculator.add_indicator(:slow_ma, slow_ma)
+
             # モメンタム指標の追加
             @indicator_calculator.indicators ||= {}
             begin
@@ -395,10 +404,17 @@ module MT4Backtester
 
   # デバッグ出力
   if @debug_mode
-    #puts "日時: #{@candles.last[:time]}"
+    puts "日時: #{@candles.last[:time]}"
     #puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
     #puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
-    #puts "シグナル: #{ma_signal}"
+    fast_ma = @indicator_calculator.value(:fast_ma)
+    slow_ma = @indicator_calculator.value(:slow_ma)
+    
+    puts "=== #{@candles.last[:time]} MA判定 ==="
+    puts "FastMA(5): #{fast_ma}"
+    puts "SlowMA(14): #{slow_ma}"
+    puts "シグナル: #{ma_signal}"
+    puts "========================="
   end
 
   # デバッグ情報の追加 - ここから

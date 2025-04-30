@@ -22,7 +22,11 @@ module MT4Backtester
       
       # 移動平均を追加
       def add_ma(name, period, price_type = :close)
-        @indicators[name] = MovingAverage.new(period, price_type)
+        # 既存のMovingAverageクラスの代わりにMT4CompatibleMAを使用
+        # @indicators[name] = MovingAverage.new(period, price_type)
+        
+        # 新しいMT4互換クラスを使用
+        @indicators[name] = MT4CompatibleMA.new(period, :sma, price_type)
         calculate(@indicators[name]) if @candles.any?
         @indicators[name]
       end
@@ -79,14 +83,21 @@ module MT4Backtester
           puts "前回 FastMA: #{prev_fast}, SlowMA: #{prev_slow}"
         end
 
-        # クロスオーバー検出（原MQL4コードに忠実に）
-        if current_fast > current_slow && prev_fast > prev_slow
+        # MT4と同様に、必ず買いか売りのどちらかを返すように修正
+        if current_fast >= current_slow && prev_fast >= prev_slow
           return :buy
-        elsif current_fast < current_slow && prev_fast < prev_slow
-          return :sell
         else
-          return :none  # 明確なシグナルがない場合
+          # それ以外はすべて売り
+          return :sell
         end
+        # クロスオーバー検出（原MQL4コードに忠実に）
+        #if current_fast > current_slow && prev_fast > prev_slow
+        #  return :buy
+        #elsif current_fast < current_slow && prev_fast < prev_slow
+        #  return :sell
+        #else
+        #  return :none  # 明確なシグナルがない場合
+        #end
 
       end
 

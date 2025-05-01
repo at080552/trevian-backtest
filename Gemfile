@@ -12,3 +12,10 @@ gem 'dotenv'
 group :development do
   gem 'pry'
 end
+
+# テスト関連のGem
+group :test do
+  gem 'rspec'
+  gem 'rspec-expectations'
+  gem 'byebug'  # デバッグ用
+end

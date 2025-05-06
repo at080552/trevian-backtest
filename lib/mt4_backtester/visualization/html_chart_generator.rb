@@ -97,6 +97,7 @@ module MT4Backtester
       padding: 8px 12px;
       text-align: left;
       border-bottom: 1px solid #ddd;
+      white-space: nowrap;
     }
     th {
       background-color: #f2f2f2;
@@ -816,7 +817,7 @@ HTML
       
       def format_number(number)
         return "0.00" if number.nil?
-        format('%.2f', number)
+        format('%.5f', number)
       end
       
       def calculate_final_balance

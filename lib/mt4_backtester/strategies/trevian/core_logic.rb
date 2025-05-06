@@ -306,7 +306,7 @@ module MT4Backtester
             end
             puts "============================="
           end
-
+          #puts "#{params.inspect}"
         end
         
         # アカウント情報の更新
@@ -318,12 +318,36 @@ module MT4Backtester
         
         # エントリー条件の確認
         def check_entry_conditions(tick)
+
+  # トレンド判定前のデバッグ出力
+  puts "===== 初期パラメータ ====="
+  puts "日時: #{tick[:time]}"
+  puts "Gap: #{@params[:Gap]}, Takeprofit: #{@params[:Takeprofit]}, SpredKeisuu: #{@params[:SpredKeisuu]}"
+  puts "next_order_keisu: #{@params[:next_order_keisu]}"
+  puts "fukuri: #{@params[:fukuri]}, AccountBalance: #{@account_info[:balance]}"
+
           # MAやトレンド判定のためのデータを準備
           prepare_indicators(tick)
-          
+
+  # 移動平均値の取得
+  fast_ma1 = @indicator_calculator.value(:fast_ma)
+  fast_ma2 = @indicator_calculator.previous_value(:fast_ma, 1)
+  slow_ma1 = @indicator_calculator.value(:slow_ma)
+  slow_ma2 = @indicator_calculator.previous_value(:slow_ma, 1)
+  
+  # デバッグ出力 - 移動平均値
+  puts "===== 移動平均値 ====="
+  puts "FastMA1: #{fast_ma1}, FastMA2: #{fast_ma2}"
+  puts "SlowMA1: #{slow_ma1}, SlowMA2: #{slow_ma2}"
+  puts "FastMA1 > SlowMA1: #{fast_ma1} > #{slow_ma1}"
+  puts "FastMA2 > SlowMA2: #{fast_ma2} > #{slow_ma2}"
+
           # トレンド判定
           trend = determine_trend
-          
+
+  # トレンド判定結果
+  puts "トレンド判定: #{trend == :buy ? '買い (BUY)' : '売り (SELL)'}"
+
           return trend
         end
         
@@ -492,17 +516,38 @@ module MT4Backtester
         
         # 最適ロット計算（Trevianのロジックを再現）
         def calculate_optimal_lot(gap, profit, max_lot, positions)
+  # デバッグ出力
+  if @debug_mode
+    puts "===== 極利計算開始 ====="
+    puts "Gap: #{gap}, Takeprofit: #{profit}, MaxLotX: #{max_lot}"
+    puts "LosCutPosition: #{positions}, LosCutProfit: #{@params[:LosCutProfit]}"
+    puts "LosCutPlus: #{@params[:LosCutPlus]}, fukuri: #{@params[:fukuri]}"
+    puts "MinusLot: #{@params[:MinusLot]}, アカウント残高: #{@account_info[:balance]}"  
+  end
+
+# 重要な変更: すべての計算を円建てで統一
+  # MT4ではアカウント残高はドル表示でも、内部計算は円ベースの可能性がある
+
           # Trevianのロットサイズ計算（極利計算）
           start_lot = 0.01
-          lot_coefficient = ((gap + profit) / profit) * 1.3
+          lot_coefficient = ((gap + profit) / profit) * @params[:keisu_x]
+          next_order_keisu = lot_coefficient  # MT4の "次の注文係数" 変数を再現
+          puts "次の注文係数: #{next_order_keisu}"
+
           lot_array = Array.new(positions, 0.0)
           total_lots = 0.0
           syokokin_lot = 0.0
           best_start_lot = start_lot
           
           # ロスカット設定に基づく調整
-          loss_cut_profit = @params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1))
-          sikin = @account_info[:balance] + loss_cut_profit
+          loss_cut_profit = @params[:LosCutProfit] 
+          loss_cut_plus = @params[:LosCutPlus]
+
+
+          loss_cut_total = loss_cut_profit + (loss_cut_plus * (@params[:fukuri] - 1))
+          sikin = @params[:Start_Sikin] + loss_cut_total
+          
+
           yojyou_syokokin = 0.0
           hituyou_syokokin = 0.0
           
@@ -516,64 +561,106 @@ module MT4Backtester
                                     else
                                       100000.0 / 25.0 # デフォルト：MT4と同様の計算
                                     end
-          
-          # MT4と同様のループ構造
-          test_start_lot = start_lot
-          while test_start_lot <= max_lot
-            total_lots = 0.0
-            syokokin_lot = 0.0
-            
-            # 最初のポジションのロット設定
-            lot_array[0] = test_start_lot
-            
-            # 各ポジションのロット計算
-            max_lot_flag = 0
-            
-            for i in 1...positions
-              # 次のロットサイズを計算（小数点2桁に丸める）- MT4のMathCeilと同等の動作
-              lot_array[i] = ((lot_array[i-1] * lot_coefficient + 0.03) * 100).ceil / 100.0
-              
-              # 偶数・奇数位置に応じてロットを分類
-              if positions == 2 || positions == 4 || positions == 6 || positions == 8
-                if i % 2 == 1  # ポジション2, 4, 6のロット
-                  total_lots += lot_array[i]
-                end
-                if i % 2 == 0  # ポジション1, 3, 5のロット
-                  syokokin_lot += lot_array[i]
-                end
-              elsif positions == 3 || positions == 5 || positions == 7
-                if i % 2 == 1  # ポジション1, 3, 5のロット
-                  syokokin_lot += lot_array[i]
-                end
-                if i % 2 == 0  # ポジション2, 4のロット
-                  total_lots += lot_array[i]
-                end
-              end
-              
-              # 最大ロットチェック
-              if total_lots >= max_lot || syokokin_lot >= max_lot
-                max_lot_flag = 1
-                break
-              end
-            end
-            
-            # 証拠金計算
-            yojyou_syokokin = sikin - (syokokin_lot * margin_required_per_lot)
-            hituyou_syokokin = total_lots * margin_required_per_lot
-            
-            # 最適解の判定
-            if max_lot_flag == 1
-              break
-            elsif yojyou_syokokin >= hituyou_syokokin
-              best_start_lot = test_start_lot
-            else
-              break
-            end
-            
-            # 次のテストロットへ
-            test_start_lot += 0.01
-          end
-          
+
+                                    puts "証拠金要件/ロット: ¥#{margin_required_per_lot}"
+                                    puts "ロット係数: #{lot_coefficient}"
+                                    puts "シキン（資金＋ロスカット): ¥#{sikin}"
+
+  # MT4と同じロット探索アルゴリズム
+  test_iterations = 0
+
+# MT4と同じループ（0.01刻みでシミュレーション）
+(1...(max_lot * 100).to_i + 1).each do |i|
+  test_start_lot = i * 0.01
+  test_iterations += 1
+  
+  # 初期化
+  total_lots = 0.0
+  syokokin_lot = 0.0
+  
+  # 初期ポジションのロット設定
+  lot_array[0] = test_start_lot
+  
+  # MT4の実装と完全に一致させる
+  max_lot_flag = 0
+  
+  # ポジションごとのロット計算
+  (1...positions).each do |j|
+    # MT4と同じロット計算式
+    next_lot = (lot_array[j-1] * lot_coefficient + @params[:keisu_pulus_pips])
+    # 小数点以下2桁に切り上げ（MT4と同じ）
+    lot_array[j] = (next_lot * 100).ceil / 100.0
+    
+    # MT4と同じポジション分類ロジック
+    if positions == 2 || positions == 4 || positions == 6 || positions == 8
+      if j % 2 == 1  # ポジション2, 4, 6のロット
+        total_lots += lot_array[j]
+      end
+      if j % 2 == 0  # ポジション1, 3, 5のロット
+        syokokin_lot += lot_array[j]
+      end
+    elsif positions == 3 || positions == 5 || positions == 7
+      if j % 2 == 1  # ポジション1, 3, 5のロット
+        syokokin_lot += lot_array[j]
+      end
+      if j % 2 == 0  # ポジション2, 4のロット
+        total_lots += lot_array[j]
+      end
+    end
+    
+    # 最大ロットチェック
+    if total_lots >= max_lot || syokokin_lot >= max_lot
+      max_lot_flag = 1
+      break
+    end
+  end
+
+    # デバッグ出力（テスト初期と0.1刻みで出力）
+    if test_start_lot <= 0.05 || (test_start_lot % 0.1 == 0 && test_start_lot <= 0.5)
+      lots_str = lot_array.map { |l| sprintf("%.2f", l) }.join(', ')
+      puts "テスト[#{test_iterations}] lot:#{test_start_lot} - ロット配列:[#{lots_str}]"
+      puts "  totalLots:#{total_lots.round(2)}, syokokinLot:#{syokokin_lot.round(2)}"
+    end
+
+  # MT4と同じ証拠金計算
+  yojyou_syokokin = sikin - (syokokin_lot * margin_required_per_lot)
+  hituyou_syokokin = total_lots * margin_required_per_lot
+
+      # デバッグ出力（テスト初期と0.1刻みで出力）
+      if test_start_lot <= 0.05 || (test_start_lot % 0.1 == 0 && test_start_lot <= 0.5)
+        puts "  余剰証拠金: ¥#{yojyou_syokokin.round(2)}, 必要証拠金: ¥#{hituyou_syokokin.round(2)}"
+        puts "  条件: #{yojyou_syokokin.round(2)} >= #{hituyou_syokokin.round(2)} ?: #{yojyou_syokokin >= hituyou_syokokin}"
+      end
+      
+      # MT4と同じ判定ロジック
+      if max_lot_flag == 1
+        if test_start_lot <= 0.05 || (test_start_lot % 0.1 == 0 && test_start_lot <= 0.5)
+          puts "  結果: 最大ロット超過のため中断"
+        end
+        break
+      elsif yojyou_syokokin >= hituyou_syokokin
+        best_start_lot = test_start_lot
+        if test_start_lot <= 0.05 || (test_start_lot % 0.1 == 0 && test_start_lot <= 0.5)
+          puts "  結果: このロットは可能 (best更新: #{best_start_lot})"
+        end
+      else
+        if test_start_lot <= 0.05 || (test_start_lot % 0.1 == 0 && test_start_lot <= 0.5)
+          puts "  結果: 証拠金不足のため中断"
+        end
+        break
+      end
+    end
+    
+    puts "テスト回数: #{test_iterations}"
+    puts "計算された初期ロット: #{best_start_lot}"
+    
+    # 0.05を超える場合の調整（MT4パラメータに合わせる）
+    adjusted_lot = best_start_lot
+    if best_start_lot > 0.05
+      adjusted_lot = best_start_lot - @params[:MinusLot]
+      puts "調整後の初期ロット: #{adjusted_lot}"
+    end
+
           return best_start_lot
         end
         
@@ -999,9 +1086,15 @@ module MT4Backtester
             @params[:MaxLotX],
             @params[:LosCutPosition]
           )
-          
-          lot = 0.01 if lot < 0.01
-          lot -= @params[:MinusLot] if lot > 0.05
+            
+  # MT4と同じ条件分岐
+  if lot < 0.01
+    lot = 0.01
+  elsif lot > 0.05
+    lot -= @params[:MinusLot]
+  end
+  
+  puts "最終ロットサイズ: #{lot}"
           
           lot
         end

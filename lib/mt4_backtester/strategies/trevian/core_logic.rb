@@ -22,11 +22,12 @@ module MT4Backtester
 
           # アカウント情報の初期化
           @account_info = {
-            balance: @params[:Start_Sikin],
-            equity: @params[:Start_Sikin],
+            balance: 45000,
+            equity: 45000,
+            initial_balance: 45000,
             margin: 0
           }
-          
+
           # 注文管理状態
           @orders = []
           @orders_in_progress = []
@@ -540,13 +541,10 @@ module MT4Backtester
           best_start_lot = start_lot
           
           # ロスカット設定に基づく調整
-          loss_cut_profit = @params[:LosCutProfit] 
-          loss_cut_plus = @params[:LosCutPlus]
-
-
-          loss_cut_total = loss_cut_profit + (loss_cut_plus * (@params[:fukuri] - 1))
-          sikin = @params[:Start_Sikin] + loss_cut_total
-          
+          #loss_cut_profit = @params[:LosCutProfit] 
+          #loss_cut_plus = @params[:LosCutPlus]
+  
+          sikin = @account_info[:balance] +  @params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1))
 
           yojyou_syokokin = 0.0
           hituyou_syokokin = 0.0
@@ -557,7 +555,8 @@ module MT4Backtester
                                     when 'USDJPY', 'GBPJPY', 'EURJPY'
                                       1000.0 # 円通貨ペア
                                     when 'GBPUSD', 'EURUSD', 'EURAUD'
-                                      4000.0 # その他メジャー通貨ペア
+                                      #4000.0 # その他メジャー通貨ペア
+                                      5000
                                     else
                                       100000.0 / 25.0 # デフォルト：MT4と同様の計算
                                     end
@@ -1198,7 +1197,7 @@ module MT4Backtester
           losing_trades = @orders.count { |o| o[:profit] && o[:profit] <= 0 }
           
           # 資金効率を計算
-          initial_balance = @params[:Start_Sikin] || 300
+          initial_balance = @account_info[:initial_balance] || 45000
           profit_factor = 0
           
           # プロフィットファクターの計算

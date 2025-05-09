@@ -156,24 +156,21 @@ module MT4Backtester
 
         # 証拠金計算用のヘルパーメソッド
         def calculate_margin(lot_size, price)
-          # 1. 通貨ペアに応じた設定
+          # 基本パラメータの設定
           contract_size = 100000  # 1ロット = 10万通貨（GBP）
           margin_rate = 0.04      # 証拠金率4%（レバレッジ25倍）
+          usdjpy_rate = @params[:USDJPY_rate] || 155.0
           
-          # 2. ドル建て証拠金計算
-          # (lot_size / 0.01) は1000通貨単位のロット数から絶対ロット数への変換
-          usd_margin = (lot_size / 0.01) * contract_size * price * margin_rate
+          # 直接計算（数量換算なし）
+          usd_margin = lot_size * contract_size * price * margin_rate
+          jpy_margin = usd_margin * usdjpy_rate
           
-          # 3. 円建て証拠金計算（USDJPYレートで変換）
-          jpy_margin = usd_margin * @params[:USDJPY_rate]
-          
-          # 4. デバッグ情報（必要に応じて）
+          # デバッグ情報
           if @debug_mode
-            puts "ロット: #{lot_size}, レート: #{price}, USDJPY: #{@params[:USDJPY_rate]}"
+            puts "ロット: #{lot_size}, レート: #{price}, USDJPY: #{usdjpy_rate}"
             puts "USD証拠金: #{usd_margin}, JPY証拠金: #{jpy_margin}"
           end
           
-          # 5. 円建て証拠金を返す
           return jpy_margin
         end
 
@@ -291,10 +288,15 @@ module MT4Backtester
             entry_signal = check_entry_conditions(tick)
             # 新規エントリー
             if @positions.empty? && entry_signal != :none
-              open_position(tick, entry_signal)
+              #open_position(tick, entry_signal)
+              open_first_position(tick, entry_signal)
+              # ここで追加ポジション判定をしない
+              return # 最初のポジション作成後は処理終了
             end
-            # 追加ポジション判定
-            check_additional_positions(tick)
+            # 既存ポジションがある場合のみ追加ポジション判定
+            if !@positions.empty?
+              check_additional_positions(tick)
+            end
           end
 
           # トレーリングストップ管理
@@ -490,7 +492,61 @@ module MT4Backtester
 
           return ma_signal
         end
-        
+
+        def open_first_position(tick, type)
+          lot_size = calculate_lot_size
+          # エントリー理由を追加
+          entry_reason = get_entry_reason(type)
+          # ポジションを作成
+          position = {
+            ticket: generate_ticket_id,
+            type: type,
+            open_time: tick[:time],
+            open_price: type == :buy ? tick[:close] : tick[:close],
+            lot_size: lot_size,
+            stop_loss: nil,
+            take_profit: nil,
+            reason: entry_reason,
+            # 追加情報
+            magic_number: @params[:MAGIC] || 8888,
+            symbol: @params[:Symbol] || 'GBPUSD',
+            # ポジション管理のための情報
+            entry_positions_count: @positions.size
+          }
+          @positions << position
+          
+          # 次のポジションのための価格レベル設定
+          if type == :buy
+            @state[:buy_rate] = position[:open_price]
+            @state[:sell_rate] = @state[:buy_rate] - (@params[:GapProfit] / @params[:SpredKeisuu])
+            @state[:next_order] = 2  # 次は売り
+          else
+            @state[:sell_rate] = position[:open_price]
+            @state[:buy_rate] = @state[:sell_rate] + (@params[:GapProfit] / @params[:SpredKeisuu])
+            @state[:next_order] = 1  # 次は買い
+          end
+          
+          # MT4版同様、次の指値注文をセット
+          prepare_next_stop_order(type)
+          
+          return position
+        end
+
+        def prepare_next_stop_order(type)
+          # 次のポジションのための指値注文を設定（記録のみ）
+          next_type = type == :buy ? :sell : :buy
+          next_price = next_type == :buy ? @state[:buy_rate] : @state[:sell_rate]
+          next_lot = calculate_next_lot_size
+          
+          @pending_orders = [{
+            type: next_type,
+            price: next_price,
+            lot_size: next_lot,
+            stop_order: true,  # 指値注文フラグ
+            created_at: Time.now
+          }]
+        end
+
         # ポジションのオープン
         def open_position(tick, signal)
           lot_size = calculate_lot_size
@@ -573,17 +629,10 @@ module MT4Backtester
           yojyou_syokokin = 0.0
           hituyou_syokokin = 0.0
           
-          # マージン要件の計算 - 通貨ペアに応じた調整
-          symbol = @params[:Symbol] || 'GBPUSD'
-          margin_required_per_lot = case symbol
-                                    when 'USDJPY', 'GBPJPY', 'EURJPY'
-                                      1000.0 # 円通貨ペア
-                                    when 'GBPUSD', 'EURUSD', 'EURAUD'
-                                      #4000.0 # その他メジャー通貨ペア
-                                      5000
-                                    else
-                                      100000.0 / 25.0 # デフォルト：MT4と同様の計算
-                                    end
+          # 現在の価格を取得（最新のティックまたはデフォルト値）
+          current_price = @candles.last ? @candles.last[:close] : 1.25
+          # 1ロットあたりの証拠金要件を計算（MT4の計算と一致させる）
+          margin_required_per_lot = calculate_margin(1.0, current_price)
 
                                     puts "証拠金要件/ロット: ¥#{margin_required_per_lot}"
                                     puts "ロット係数: #{lot_coefficient}"
@@ -708,17 +757,24 @@ module MT4Backtester
         
         # 追加ポジション判定
         def check_additional_positions(tick)
-          return if @positions.empty?
+          return if @positions.empty? || @pending_orders.empty?
           
-          # 既存ポジションの逆方向に一定価格差でポジションを取る
-          case @state[:next_order]
-          when 1  # 次は買い
-            if tick[:close] <= @state[:buy_rate]
-              add_position(tick, :buy)
+          # 保留中の指値注文をチェック
+          @pending_orders.each do |order|
+            execute = false
+            
+            if order[:type] == :buy && tick[:close] <= order[:price]
+              # 買い指値が発動
+              execute = true
+            elsif order[:type] == :sell && tick[:close] >= order[:price]
+              # 売り指値が発動
+              execute = true
             end
-          when 2  # 次は売り
-            if tick[:close] >= @state[:sell_rate]
-              add_position(tick, :sell)
+            
+            if execute
+              # 指値注文を執行
+              add_position(tick, order[:type])
+              @pending_orders.delete(order)
             end
           end
         end

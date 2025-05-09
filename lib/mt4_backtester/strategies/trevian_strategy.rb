@@ -18,6 +18,7 @@ module MT4Backtester
         @account = {
           balance: @params[:Start_Sikin] || 300,
           equity: @params[:Start_Sikin] || 300,
+          initial_balance: @params[:Start_Sikin] || 300,
           margin: 0,
           free_margin: @params[:Start_Sikin] || 300
         }

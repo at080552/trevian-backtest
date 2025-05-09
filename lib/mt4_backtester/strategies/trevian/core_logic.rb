@@ -22,9 +22,9 @@ module MT4Backtester
 
           # アカウント情報の初期化
           @account_info = {
-            balance: 45000,
-            equity: 45000,
-            initial_balance: 45000,
+            balance: @params[:Start_Sikin],
+            equity: @params[:Start_Sikin],
+            initial_balance: @params[:Start_Sikin],
             margin: 0
           }
 
@@ -525,10 +525,6 @@ module MT4Backtester
     puts "LosCutPlus: #{@params[:LosCutPlus]}, fukuri: #{@params[:fukuri]}"
     puts "MinusLot: #{@params[:MinusLot]}, アカウント残高: #{@account_info[:balance]}"  
   end
-
-# 重要な変更: すべての計算を円建てで統一
-  # MT4ではアカウント残高はドル表示でも、内部計算は円ベースの可能性がある
-
           # Trevianのロットサイズ計算（極利計算）
           start_lot = 0.01
           lot_coefficient = ((gap + profit) / profit) * @params[:keisu_x]
@@ -1197,7 +1193,6 @@ module MT4Backtester
           losing_trades = @orders.count { |o| o[:profit] && o[:profit] <= 0 }
           
           # 資金効率を計算
-          initial_balance = @account_info[:initial_balance] || 45000
           profit_factor = 0
           
           # プロフィットファクターの計算

@@ -26,7 +26,8 @@ module MT4Backtester
           LosCutPosition: fetch_int('TREVIAN_LOSCUT_POSITION', 15),
           LosCutProfit: fetch_float('TREVIAN_LOSCUT_PROFIT', -900),
           LosCutPlus: fetch_float('TREVIAN_LOSCUT_PLUS', -40),
-          trailLength: fetch_int('TREVIAN_TRAIL_LENGTH', 99)
+          trailLength: fetch_int('TREVIAN_TRAIL_LENGTH', 99),
+          USDJPY_rate: fetch_float('USDJPY_rate', 155.0),
         }
       end
 

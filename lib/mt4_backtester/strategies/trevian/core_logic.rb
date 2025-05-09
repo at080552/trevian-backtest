@@ -15,6 +15,9 @@ module MT4Backtester
           @indicator_calculator = nil
           @candles = []  # ここでローソク足データを保持する配列を初期化
 
+          # JPY/USD変換を含むパラメータの初期化
+          initialize_parameters
+          
           # 計算パラメータ
           @params[:GapProfit] = @params[:Gap]
           @params[:next_order_keisu] = ((@params[:GapProfit] + @params[:Takeprofit]) / @params[:Takeprofit]) * @params[:keisu_x]
@@ -44,7 +47,27 @@ module MT4Backtester
           # 戦略実行状態
           reset_state
         end
-        
+
+        # 新たに追加するメソッド
+        def initialize_parameters
+          # USDJPYレートの設定（初期値またはTick Dataから設定）
+          @params[:USDJPY_rate] ||= 155.0  # デフォルト値
+          
+          # 円建てパラメータをドル建てに変換
+          @params[:LosCutProfit_USD] = @params[:LosCutProfit] / @params[:USDJPY_rate]
+          @params[:LosCutPlus_USD] = @params[:LosCutPlus] / @params[:USDJPY_rate]
+          @params[:Start_Sikin_USD] = @params[:Start_Sikin] / @params[:USDJPY_rate]
+          
+          # デバッグ出力
+          if @debug_mode
+            puts "=== 通貨換算パラメータ ==="
+            puts "USDJPYレート: #{@params[:USDJPY_rate]}"
+            puts "ロスカット閾値: #{@params[:LosCutProfit]} JPY (#{@params[:LosCutProfit_USD]} USD)"
+            puts "ロスカット追加: #{@params[:LosCutPlus]} JPY (#{@params[:LosCutPlus_USD]} USD)"
+            puts "初期資金: #{@params[:Start_Sikin]} JPY (#{@params[:Start_Sikin_USD]} USD)"
+          end
+        end
+
         # 状態のリセット
         def reset_state
           @state = {
@@ -133,20 +156,25 @@ module MT4Backtester
 
         # 証拠金計算用のヘルパーメソッド
         def calculate_margin(lot_size, price)
-          # 1ロット = 100,000通貨単位、レバレッジ100倍の場合の簡易計算
-          contract_size = 100000
-          leverage = @params[:leverage] || 100
+          # 1. 通貨ペアに応じた設定
+          contract_size = 100000  # 1ロット = 10万通貨（GBP）
+          margin_rate = 0.04      # 証拠金率4%（レバレッジ25倍）
           
-          (lot_size * contract_size * price) / leverage
-        end
-
-        # ポジションの利益計算
-        def calculate_position_profit(position, tick)
-          if position[:type] == :buy
-            (tick[:close] - position[:open_price]) * @params[:SpredKeisuu]
-          else
-            (position[:open_price] - tick[:close]) * @params[:SpredKeisuu]
+          # 2. ドル建て証拠金計算
+          # (lot_size / 0.01) は1000通貨単位のロット数から絶対ロット数への変換
+          usd_margin = (lot_size / 0.01) * contract_size * price * margin_rate
+          
+          # 3. 円建て証拠金計算（USDJPYレートで変換）
+          jpy_margin = usd_margin * @params[:USDJPY_rate]
+          
+          # 4. デバッグ情報（必要に応じて）
+          if @debug_mode
+            puts "ロット: #{lot_size}, レート: #{price}, USDJPY: #{@params[:USDJPY_rate]}"
+            puts "USD証拠金: #{usd_margin}, JPY証拠金: #{jpy_margin}"
           end
+          
+          # 5. 円建て証拠金を返す
+          return jpy_margin
         end
 
         def pips
@@ -828,13 +856,30 @@ module MT4Backtester
         
         # ポジションの利益計算
         def calculate_position_profit(position, tick)
+          # 1. pips単位の損益計算（MT4コードと同等）
+          price_diff = 0
           if position[:type] == :buy
-            (tick[:close] - position[:open_price]) * @params[:SpredKeisuu]
+            price_diff = (tick[:close] - position[:open_price]) * @params[:SpredKeisuu]
           else
-            (position[:open_price] - tick[:close]) * @params[:SpredKeisuu]
+            price_diff = (position[:open_price] - tick[:close]) * @params[:SpredKeisuu]
           end
+          
+          # pipsからUSD損益計算 (0.01ロットあたり1USD/pipの場合)
+          lot_pips_value = position[:lot_size] * 100 # 0.01ロット = 1USD/pip
+          usd_profit = price_diff * lot_pips_value / @params[:SpredKeisuu]
+          
+          # USD損益からJPY損益
+          jpy_profit = usd_profit * @params[:USDJPY_rate]
+
+          if @debug_mode
+            puts "Position: #{position[:type]}, Lot: #{position[:lot_size]}"
+            puts "Price diff: #{(position[:type] == :buy ? tick[:close] - position[:open_price] : position[:open_price] - tick[:close])}"
+            puts "price_diff: #{price_diff}, USD profit: #{usd_profit}, JPY profit: #{jpy_profit}"
+          end
+
+          return jpy_profit
         end
-        
+
         # トレーリングストップ開始
         def start_trailing_stop(tick)
           return if @positions.empty?

@@ -141,6 +141,17 @@ module MT4Backtester
         return unless @results[:trades] && !@results[:trades].empty?
         
         @results[:trades].each do |trade|
+          # 通貨単位を明示的に取得（なければデフォルトでUSD）
+          currency = trade[:currency] || "USD"
+          # 利益のフォーマット準備
+          profit = trade[:profit]
+          profit_display = if profit
+            currency == "USD" ? 
+              "$#{format('%.5f', profit)}" : 
+              "¥#{format('%.2f', profit)}"
+          else
+            nil
+          end
           # エントリーポイント
           entry_point = {
             time: trade[:open_time].strftime('%Y-%m-%d %H:%M'),
@@ -152,7 +163,8 @@ module MT4Backtester
             account_balance: trade[:entry_balance] || nil, # エントリー時の口座残高
             account_equity: trade[:entry_equity] || nil, # エントリー時のエクイティ
             margin: trade[:entry_margin] || nil, # エントリー時の必要証拠金
-            positions_count: trade[:entry_positions_count] || nil # エントリー時のポジション数
+            positions_count: trade[:entry_positions_count] || nil, # エントリー時のポジション数
+            currency: currency  # 通貨単位を追加
           }
           
           # 決済ポイント
@@ -163,11 +175,13 @@ module MT4Backtester
             action: 'exit',
             lot: trade[:lot_size],
             profit: trade[:profit],
+            profit_display: profit_display,  # 表示用フォーマット済み文字列を追加
             reason: trade[:exit_reason] || "決済", # 決済理由
             account_balance: trade[:exit_balance] || nil, # 決済後の口座残高
             account_equity: trade[:exit_equity] || nil, # 決済時のエクイティ
             margin: trade[:exit_margin] || nil, # 決済時の必要証拠金
-            positions_count: trade[:exit_positions_count] || nil # 決済後のポジション数
+            positions_count: trade[:exit_positions_count] || nil, # 決済後のポジション数
+            currency: currency  # 通貨単位を追加
           }
           
           @trade_points << entry_point

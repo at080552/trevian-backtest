@@ -68,21 +68,20 @@ module MT4Backtester
         
         return :sell if fast_ma.nil? || slow_ma.nil?
       
-        # インデックス1と2の値を取得（MT4と同じ）
-        fast_ma1 = fast_ma.value(1)
-        fast_ma2 = fast_ma.value(2)
-        slow_ma1 = slow_ma.value(1)
-        slow_ma2 = slow_ma.value(2)
-
-        # データが揃っていなければデフォルト値を返す（初期データ不足の場合）
-        if fast_ma1.nil? || fast_ma2.nil? || slow_ma1.nil? || slow_ma2.nil?
-          # 履歴データが不足している場合は、デフォルトのシグナルを返す
-          # または十分なデータが揃うまで待つという選択も可能
-          return :sell  # または :buy か :sell をデフォルトとして返す
+        # 現在と前回の値を取得
+        fast_ma_current = fast_ma.current_value
+        fast_ma_prev = fast_ma.previous_value
+        slow_ma_current = slow_ma.current_value
+        slow_ma_prev = slow_ma.previous_value
+      
+        # デバッグ出力を追加
+        if @debug_mode
+          puts "MA Check - Current: FastMA=#{fast_ma_current}, SlowMA=#{slow_ma_current}, FastMA > SlowMA: #{fast_ma_current > slow_ma_current}"
+          puts "MA Check - Previous: FastMA=#{fast_ma_prev}, SlowMA=#{slow_ma_prev}, FastMA > SlowMA: #{fast_ma_prev > slow_ma_prev}"
         end
-
-        # MT4と完全に同一の条件判定
-        if fast_ma2 > slow_ma2 && fast_ma1 > slow_ma1
+      
+        # 両方の条件を確認して一致したシグナルを返す
+        if fast_ma_current > slow_ma_current && fast_ma_prev > slow_ma_prev
           return :buy
         else
           return :sell

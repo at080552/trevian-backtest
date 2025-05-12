@@ -50,6 +50,18 @@ module MT4Backtester
       def post_process_results
         return unless @results
         
+        # 通貨単位情報
+        @results[:currency] = "USD"  # 基本通貨単位
+        @results[:account_currency] = "JPY"  # 口座通貨単位
+        
+        # 為替レートを戦略オブジェクトから取得（戦略が持つパラメータを参照）
+        if @strategy.respond_to?(:params) && @strategy.params && @strategy.params[:USDJPY_rate]
+          @results[:exchange_rate] = @strategy.params[:USDJPY_rate]
+        else
+          # デフォルト値を設定（推奨）
+          @results[:exchange_rate] = 155.0  # デフォルトUSD/JPYレート
+        end
+        
         # トレード統計の追加計算
         calculate_trade_statistics
         

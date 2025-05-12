@@ -815,11 +815,21 @@ HTML
       
       private
       
-      def format_number(number)
+      def format_number(number, decimals = 5)
         return "0.00" if number.nil?
-        format('%.5f', number)
+        format("%.#{decimals}f", number)
       end
-      
+
+      # 通貨付き数値フォーマット関数を追加
+      def format_currency(number, currency = "USD", decimals = 5)
+        return "$0.00" if number.nil?
+        
+        symbol = currency == "USD" ? "$" : "¥"
+        decimals = currency == "USD" ? decimals : 2  # JPYは小数点以下2桁
+        
+        "#{symbol}#{format_number(number, decimals)}"
+      end
+
       def calculate_final_balance
         initial_balance = @chart_data.results[:params][:Start_Sikin] || 0
         total_profit = @chart_data.results[:total_profit] || 0
@@ -1031,37 +1041,59 @@ HTML
         trade_count.times do |i|
           entry = entry_points[i]
           exit = exit_points[i]
-          
+
+    # 通貨単位を取得（なければUSDをデフォルトに）
+    currency = exit[:currency] || entry[:currency] || "USD"
+
           profit = exit[:profit] || 0
           profit_class = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : 'neutral')
-          
+
+    # 1. 通貨単位に応じた利益表示文字列を作成
+    profit_display = if exit[:profit_display]
+      # process_trade_pointsで既に作成された表示文字列があれば使用
+      exit[:profit_display]
+    else
+      # なければここで作成
+      currency == "USD" ? "$#{format_number(profit)}" : "¥#{format_number(profit, 2)}"
+    end
+
           type_text = entry[:type] == 'buy' ? '買い' : '売り'
           entry_reason = entry[:reason] || '-'
           exit_reason = exit[:reason] || '-'
           
-          # 残高情報（あれば表示）
-          entry_balance = entry[:account_balance] ? format_number(entry[:account_balance]) : "-"
-          exit_balance = exit[:account_balance] ? format_number(exit[:account_balance]) : "-"
-          
-          # ポジション数情報（あれば表示）
-          positions_count = entry[:positions_count] || entry[:entry_positions_count] || "-"
+    # 2. 残高情報の通貨単位も考慮
+    entry_balance_currency = entry[:balance_currency] || "JPY"  # 残高通貨はデフォルトでJPY
+    exit_balance_currency = exit[:balance_currency] || "JPY"
+    
+    # 3. 通貨単位に応じた残高表示
+    entry_balance_display = entry[:account_balance] ? 
+      (entry_balance_currency == "USD" ? "$#{format_number(entry[:account_balance])}" : "¥#{format_number(entry[:account_balance], 2)}") : 
+      "-"
+    
+    exit_balance_display = exit[:account_balance] ? 
+      (exit_balance_currency == "USD" ? "$#{format_number(exit[:account_balance])}" : "¥#{format_number(exit[:account_balance], 2)}") : 
+      "-"
+    
+    # ポジション数情報（あれば表示）
+    positions_count = entry[:positions_count] || entry[:entry_positions_count] || "-"
+    
           
           rows_html += <<-HTML
-        <tr class="trade-row">
-          <td>#{i + 1}</td>
-          <td>#{type_text}</td>
-          <td>#{format('%.2f', entry[:lot].to_f)}</td>
-          <td>#{entry[:time]}</td>
-          <td>#{format_number(entry[:price])}</td>
-          <td>#{exit[:time]}</td>
-          <td>#{format_number(exit[:price])}</td>
-          <td class="#{profit_class}">$#{format_number(profit)}</td>
-          <td>#{positions_count}</td>
-          <td>$#{entry_balance}</td>
-          <td>$#{exit_balance}</td>
-          <td>#{entry_reason}</td>
-          <td>#{exit_reason}</td>
-        </tr>
+            <tr class="trade-row">
+              <td>#{i + 1}</td>
+              <td>#{type_text}</td>
+              <td>#{format('%.2f', entry[:lot].to_f)}</td>
+              <td>#{entry[:time]}</td>
+              <td>#{format_number(entry[:price])}</td>
+              <td>#{exit[:time]}</td>
+              <td>#{format_number(exit[:price])}</td>
+              <td class="#{profit_class}">#{profit_display}</td>
+              <td>#{positions_count}</td>
+              <td>#{entry_balance_display}</td>
+              <td>#{exit_balance_display}</td>
+              <td>#{entry_reason}</td>
+              <td>#{exit_reason}</td>
+            </tr>
           HTML
         end
         

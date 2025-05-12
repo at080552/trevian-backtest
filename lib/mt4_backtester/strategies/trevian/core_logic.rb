@@ -456,22 +456,20 @@ module MT4Backtester
           # 移動平均クロスオーバーによる判定
           ma_signal = @indicator_calculator.ma_crossover_check(:fast_ma, :slow_ma)
           
-          # デバッグ出力（必要に応じて）
-          #puts "MA Signal: #{ma_signal}, Fast MA: #{@indicator_calculator.value(:fast_ma)}, Slow MA: #{@indicator_calculator.value(:slow_ma)}"
-
+  # 移動平均の値を直接取得
+  fast_ma_current = @indicator_calculator.value(:fast_ma)
+  fast_ma_prev = @indicator_calculator.previous_value(:fast_ma, 1)
+  slow_ma_current = @indicator_calculator.value(:slow_ma)
+  slow_ma_prev = @indicator_calculator.previous_value(:slow_ma, 1)
+  
   # デバッグ出力
   if @debug_mode
-    puts "日時: #{@candles.last[:time]}"
-    #puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
-    #puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
-    fast_ma = @indicator_calculator.value(:fast_ma)
-    slow_ma = @indicator_calculator.value(:slow_ma)
-    
-    puts "=== #{@candles.last[:time]} MA判定 ==="
-    puts "FastMA(5): #{fast_ma}"
-    puts "SlowMA(14): #{slow_ma}"
-    puts "シグナル: #{ma_signal}"
-    puts "========================="
+    puts "=== #{@candles.last[:time]} MA判定（直接比較） ==="
+    puts "FastMA現在値: #{fast_ma_current}, 前回値: #{fast_ma_prev}"
+    puts "SlowMA現在値: #{slow_ma_current}, 前回値: #{slow_ma_prev}"
+    puts "現在: FastMA > SlowMA = #{fast_ma_current > slow_ma_current}"
+    puts "前回: FastMA > SlowMA = #{fast_ma_prev > slow_ma_prev}"
+    puts "MA判定結果(@indicator_calculator.previous_value(:slow_ma, 1)): #{ma_signal}"
   end
 
   # デバッグ情報の追加 - ここから
@@ -489,6 +487,16 @@ module MT4Backtester
     end
   end
   # デバッグ情報の追加 - ここまで
+
+  # 明示的な判定ロジック
+  if fast_ma_current > slow_ma_current && fast_ma_prev > slow_ma_prev
+    ma_signal = :buy
+  else
+    ma_signal = :sell
+  end
+  
+  # デバッグ出力（必要に応じて）
+  puts "MA判定結果: #{ma_signal}"
 
           return ma_signal
         end
@@ -911,7 +919,7 @@ module MT4Backtester
         end
         
         # ポジションの利益計算
-        def calculate_position_profit(position, tick)
+        def calculate_position_profit(position, tick, return_currency = :JPY)
           # MT4バックテストのスプレッド設定値から実際のスプレッドを計算
           mt4_spread_points = 12.0  # 楽天MT4バックテストのスプレッド設定値
           
@@ -975,8 +983,23 @@ module MT4Backtester
             puts "Price diff: #{price_diff / @params[:SpredKeisuu]} (#{price_diff} pips)"
             puts "USD profit: #{usd_profit}, JPY profit: #{jpy_profit}"
           end
+          # 最終的な計算結果の返却前に通貨単位を明確にする
+          result = {
+            pips: price_diff / @params[:SpredKeisuu],
+            usd: usd_profit,
+            jpy: jpy_profit,
+            currency: return_currency  # どの通貨単位で返すかを明示
+          }
+  
+          # デバッグ情報を追加
+          if @debug_mode
+            puts "【利益計算】 Position: #{position[:type]}, Lot: #{position[:lot_size]}"
+            puts "  Pips: #{result[:pips]}, USD: #{result[:usd]}, JPY: #{result[:jpy]}"
+          end
+  
+          # 指定した通貨単位の値を返す
+          return return_currency == :USD ? result[:usd] : result[:jpy]
 
-          return jpy_profit
         end
 
         # トレーリングストップ開始
@@ -1023,26 +1046,32 @@ module MT4Backtester
 
           # 決済理由を追加
           exit_reason = get_exit_reason(position, tick)
+
+          profit_usd = profit || calculate_position_profit(position, tick, :USD)
+          profit_jpy = profit
           
+          # トレード記録に通貨単位情報を追加
           trade = position.merge(
             close_time: tick[:time],
             close_price: tick[:close],
-            profit: profit,
-            position_count: @positions.size,  # ポジション数を追加
-            exit_reason: exit_reason  # 決済理由を追加
+            profit: profit_usd,      # USD単位で保存
+            profit_jpy: profit_jpy,  # JPY単位も保存
+            currency: "USD",         # 明示的に通貨単位を記録
+            position_count: @positions.size,
+            exit_reason: get_exit_reason(position, tick)
           )
 
           @orders << trade
-          @total_profit += profit
+          #@total_profit += profit
+          @total_profit += profit_usd  # 集計は一貫してUSDで
           # アカウント情報の残高を更新
           @account_info[:balance] += profit
 
   if @debug_mode
   # 残高更新のデバッグ出力
-    puts "===== ポジション決済 ====="
-    puts "時間: #{tick[:time]}"
+    puts "【ポジション決済】#{position[:type]}, Lot: #{position[:lot_size]}"
     puts "ポジションタイプ: #{position[:type]}"
-    puts "利益: #{profit}"
+    puts "利益: $#{profit_usd} (¥#{profit_jpy})"
     puts "残高更新: #{old_balance} -> #{@account_info[:balance]}"
     puts "=========================="
   end
@@ -1183,14 +1212,6 @@ module MT4Backtester
           # ポジション数がLosCutPosition以上の場合、利益をチェック
           if @positions.size >= @params[:LosCutPosition]
             total_profit = 0
-            
-            # すべてのポジションの損益を計算 - MT4と同様にスプレッドを考慮しない単純計算に
-            #@positions.each do |pos|
-            #  # シンプルな損益計算（MT4の TotalProfit に近づける）
-            #  profit = calculate_position_profit(pos, tick)
-            #  total_profit += profit
-            #end
-
             # すべてのポジションの損益を計算（MT4と同様のシンプルな計算）
             @positions.each do |pos|
               if pos[:type] == :buy

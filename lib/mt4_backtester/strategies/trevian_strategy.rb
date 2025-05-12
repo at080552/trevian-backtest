@@ -68,7 +68,19 @@ module MT4Backtester
         
         @results[:trades].each_with_index do |trade, index|
           symbol = trade[:symbol] || 'GBPUSD' # シンボルがなければデフォルト値
-          
+
+    # 通貨単位を明示的に設定
+    trade[:currency] ||= "USD"
+    
+    # JPY換算の利益も記録（存在しない場合）
+    if !trade[:profit_jpy] && trade[:profit]
+      trade[:profit_jpy] = trade[:profit] * @params[:USDJPY_rate]
+    end
+    
+    # 小数点以下の精度を統一（丸め誤差を防止）
+    trade[:profit] = trade[:profit].round(5) if trade[:profit]
+    trade[:profit_jpy] = trade[:profit_jpy].round(2) if trade[:profit_jpy]
+
           # 通貨ペアごとのポジション管理
           active_positions[symbol] ||= []
           

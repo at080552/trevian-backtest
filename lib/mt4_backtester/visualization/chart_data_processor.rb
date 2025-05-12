@@ -139,8 +139,12 @@ module MT4Backtester
 
       def process_trade_points
         return unless @results[:trades] && !@results[:trades].empty?
-        
+  # デバッグ出力を追加
+  puts "処理するトレード数: #{@results[:trades].size}"
+
         @results[:trades].each do |trade|
+    # エントリーポイントと決済ポイントを作成する前に取引データをチェック
+    puts "処理中のトレード: #{trade.inspect}" if @debug_mode
           # 通貨単位を明示的に取得（なければデフォルトでUSD）
           currency = trade[:currency] || "USD"
           # 利益のフォーマット準備

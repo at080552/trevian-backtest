@@ -1028,19 +1028,33 @@ HTML
       
       def generate_detailed_trades_table_rows
         return "" if @chart_data.trade_points.empty?
-        
+  # トレードポイントが空でないことをログ出力
+  puts "トレードポイント数: #{@chart_data.trade_points.size}"
+
+puts "=== トレード情報 ==="
+@chart_data.trade_points.select { |p| p[:action] == 'exit' }.each_with_index do |point, idx|
+  puts "#{idx+1}: profit=#{point[:profit]}, currency=#{point[:currency]}, display=#{point[:profit_display]}"
+end
+
         # エントリーと決済をペアにする
         entry_points = @chart_data.trade_points.select { |p| p[:action] == 'entry' }
         exit_points = @chart_data.trade_points.select { |p| p[:action] == 'exit' }
-        
+
+  # デバッグ用に数を出力
+  puts "エントリーポイント数: #{entry_points.size}, 決済ポイント数: #{exit_points.size}"
+
         # 取引ペアは少ないほうに合わせる
         trade_count = [entry_points.size, exit_points.size].min
-        
-        rows_html = ""
+  puts "処理する取引ペア数: #{trade_count}"
+
+  rows_html = ""
         
         trade_count.times do |i|
           entry = entry_points[i]
           exit = exit_points[i]
+
+    # エントリーまたは決済データがない場合はスキップ
+    next if entry.nil? || exit.nil?
 
     # 通貨単位を取得（なければUSDをデフォルトに）
     currency = exit[:currency] || entry[:currency] || "USD"

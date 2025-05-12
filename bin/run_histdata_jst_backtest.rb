@@ -201,7 +201,15 @@ if options[:output_file]
   
   # 完全な結果を保存
   output_results = results.dup
+
+  # トレードデータの件数を出力
+  puts "保存するトレード数: #{output_results[:trades] ? output_results[:trades].size : 0}"
   
+  # 最初の取引のサンプルを出力（あれば）
+  if output_results[:trades] && !output_results[:trades].empty?
+    puts "最初のトレードサンプル: #{output_results[:trades].first.inspect}"
+  end
+
   begin
     # 出力ディレクトリがなければ作成
     output_dir = File.dirname(options[:output_file])

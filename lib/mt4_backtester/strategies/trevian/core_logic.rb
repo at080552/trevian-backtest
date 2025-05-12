@@ -522,7 +522,10 @@ module MT4Backtester
             entry_positions_count: @positions.size
           }
           @positions << position
-          
+          # トレード追跡用の記録を残す - ここを追加
+          @orders_in_progress ||= []
+          @orders_in_progress << position.dup
+
           # 次のポジションのための価格レベル設定
           if type == :buy
             @state[:buy_rate] = position[:open_price]
@@ -973,13 +976,11 @@ module MT4Backtester
 
           if @debug_mode
             puts "USDJPY_rate: #{@params[:USDJPY_rate]}"
-            bid_est = tick[:bid] || (tick[:close] - (spread_pips / (2 * @params[:SpredKeisuu])))
-            ask_est = tick[:ask] || (tick[:close] + (spread_pips / (2 * @params[:SpredKeisuu])))
+            puts "【利益計算】 Position: #{position[:type]}, Lot: #{position[:lot_size]}"
             puts "lot_pip_value: #{position[:lot_size]} * #{pip_value_per_standard_lot} = #{lot_pip_value}"
             puts "Position: #{position[:type]}, Lot: #{position[:lot_size]}"
             puts "スプレッド: #{spread_pips} pips (#{spread_pips / @params[:SpredKeisuu]} 価格単位)"
-            puts "Close: #{tick[:close]}, Bid(推定): #{bid_est}, Ask(推定): #{ask_est}" 
-            puts "Open: #{position[:open_price]}, Close: #{position[:type] == :buy ? bid_est : ask_est}"
+            puts "Open: #{position[:open_price]}, Close: #{position[:type] == :buy ? bid_price : ask_price}"
             puts "Price diff: #{price_diff / @params[:SpredKeisuu]} (#{price_diff} pips)"
             puts "USD profit: #{usd_profit}, JPY profit: #{jpy_profit}"
           end
@@ -1382,17 +1383,6 @@ module MT4Backtester
           }
         end
 
-        # 結果の取得
-        def get_results
-          {
-            total_trades: @orders.size,
-            winning_trades: @orders.count { |o| o[:profit] > 0 },
-            losing_trades: @orders.count { |o| o[:profit] <= 0 },
-            total_profit: @total_profit,
-            max_drawdown: @max_drawdown,
-            trades: @orders
-          }
-        end
       end
     end
   end

@@ -12,6 +12,9 @@ module MT4Backtester
           
           # パラメータのマージ（ユーザー指定のパラメータを優先）
           @params = env_params.merge(params)
+          # MT4と同じハードコード値を強制的に設定
+          @params[:lot_seigen] = 100.0      # 総ロット数制限
+          @params[:lot_pos_seigen] = 30     # 最大ポジション数制限
           @indicator_calculator = nil
           @candles = []  # ここでローソク足データを保持する配列を初期化
 
@@ -48,7 +51,6 @@ module MT4Backtester
           reset_state
         end
 
-        # 新たに追加するメソッド
         def initialize_parameters
           # USDJPYレートの設定（初期値またはTick Dataから設定）
           @params[:USDJPY_rate] ||= 155.0  # デフォルト値
@@ -224,6 +226,24 @@ module MT4Backtester
           return @close_flag
         end
 
+def record_signal(tick, signal)
+  # ログディレクトリの作成
+  log_dir = 'logs'
+  FileUtils.mkdir_p(log_dir) unless Dir.exist?(log_dir)
+  
+  # 日付フォーマット
+  timestamp = tick[:time].strftime('%Y-%m-%d %H:%M:%S')
+  
+  # MA値の取得
+  fast_ma = @indicator_calculator&.value(:fast_ma)
+  slow_ma = @indicator_calculator&.value(:slow_ma)
+  
+  # CSV形式でログを記録
+  File.open("#{log_dir}/signals.csv", 'a') do |f|
+    f.puts "#{timestamp},#{tick[:close]},#{signal},#{fast_ma},#{slow_ma}"
+  end
+end
+
         # ティックデータに対して戦略を適用
         def process_tick(tick, account_info)
           # アカウント情報の更新
@@ -266,6 +286,7 @@ module MT4Backtester
           else
             # エントリーポイント判定
             entry_signal = check_entry_conditions(tick)
+            record_signal(tick, entry_signal) if @debug_mode
             # 新規エントリー
             if @positions.empty? && entry_signal != :none
               #open_position(tick, entry_signal)
@@ -286,7 +307,7 @@ module MT4Backtester
           check_loss_cut(tick)
           # 指標データの準備（ログ出力用）
           prepare_indicators(tick) if @indicator_calculator.nil?
-          
+
           # ログ出力（ロガーがセットされている場合）- 全ての処理が終わった後に実行
           if @logger
             # インジケーターの値を取得
@@ -746,8 +767,29 @@ module MT4Backtester
           end
         end
         
-        # 追加ポジション判定
+        # MT4版と同じフラグベースの実装
         def check_additional_positions(tick)
+          next_finish_flag = 0
+          
+          # 次のロットを計算
+          next_lot = calculate_next_lot_size
+          
+          # 制限チェック
+          if @state[:all_lots] + next_lot >= @params[:lot_seigen]
+            next_finish_flag = 1
+          end
+          if @positions.size >= @params[:lot_pos_seigen]
+            next_finish_flag = 1
+          end
+          
+          # 制限に達していなければポジション追加
+          if next_finish_flag == 0
+            add_position(tick, @state[:next_order] == 1 ? :buy : :sell)
+          end
+        end
+
+        # 追加ポジション判定
+        def check_additional_positions_org(tick)
           return if @positions.empty? || @pending_orders.empty?
           
           # 保留中の指値注文をチェック
@@ -1224,14 +1266,23 @@ module MT4Backtester
             @params[:LosCutPosition]
           )
             
-  # MT4と同じ条件分岐
-  if lot < 0.01
-    lot = 0.01
-  elsif lot > 0.05
-    lot -= @params[:MinusLot]
-  end
-  
-  puts "最終ロットサイズ: #{lot}"
+          # MT4コードと同じ条件分岐（一回目の調整）
+          if lot < 0.01
+            lot = 0.01
+          elsif lot > 0.05
+            lot -= @params[:MinusLot]
+          end
+          
+          # 二回目の調整（MT4のバグを正確に再現）
+          if lot < 0.01
+            puts "最小ロット制限により0.01に調整"
+            lot = 0.01
+          elsif lot > 0.05
+            puts "ロット調整: #{lot} → #{lot - @params[:MinusLot]}"
+            lot -= @params[:MinusLot]
+          end
+          
+          puts "最終ロットサイズ: #{lot}"
           
           lot
         end

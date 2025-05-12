@@ -134,26 +134,6 @@ module MT4Backtester
           @params[:profit_rate] = @params[:Takeprofit] / @params[:SpredKeisuu]
         end
 
-        # スプレッドを考慮したポジション損益計算
-        def calculate_position_profit_with_spread(position, tick)
-          # スプレッド値を想定（実際のバックテストデータではスプレッド情報がないかもしれないので注意）
-          spread = tick[:spread] || 2.0  # スプレッドがない場合は2.0pipsを想定
-          
-          if position[:type] == :buy
-            # 買いポジションの損益計算
-            profit = (tick[:close] - position[:open_price]) * @params[:SpredKeisuu]
-            # スプレッドを考慮した実質損益（決済コスト考慮）
-            real_profit = profit - (spread * position[:lot_size])
-            return real_profit
-          else
-            # 売りポジションの損益計算
-            profit = (position[:open_price] - tick[:close]) * @params[:SpredKeisuu]
-            # スプレッドを考慮した実質損益（決済コスト考慮）
-            real_profit = profit - (spread * position[:lot_size])
-            return real_profit
-          end
-        end
-
         # 証拠金計算用のヘルパーメソッド
         def calculate_margin(lot_size, price)
           # 基本パラメータの設定
@@ -920,87 +900,73 @@ module MT4Backtester
             end
           end
         end
-        
-        # ポジションの利益計算
+
         def calculate_position_profit(position, tick, return_currency = :JPY)
-          # MT4バックテストのスプレッド設定値から実際のスプレッドを計算
+          # 基本情報
+          lot_size = position[:lot_size]
+          symbol = @params[:Symbol] || 'GBPUSD'
+          usdjpy_rate = @params[:USDJPY_rate] || 154.5
+          
+          # スプレッド（MT4の設定から）- 重要！
           mt4_spread_points = 12.0  # 楽天MT4バックテストのスプレッド設定値
           
-          # 通貨ペアに基づいてスプレッドをpips単位に変換
-          symbol = @params[:Symbol] || 'GBPUSD'
-          
-          # スプレッドをpips単位に変換（通貨ペアの表示桁数によって異なる）
-          spread_pips = case symbol
-            when /JPY$/ then mt4_spread_points * 0.01  # 3桁表示通貨ペア (USDJPY等)
-            else mt4_spread_points * 0.1               # 5桁表示通貨ペア (GBPUSD等)
+          # 通貨ペアに応じたスプレッド計算用の小数点位置
+          pip_decimal = case symbol
+            when /JPY$/ then 0.01    # JPYペアは2桁目が1pip
+            else 0.0001              # その他の主要通貨ペアは4桁目が1pip
           end
           
-          # デバッグ情報
-          if @debug_mode
-            puts "MT4スプレッド設定: #{mt4_spread_points} ポイント"
-            puts "変換後スプレッド: #{spread_pips} pips"
-          end
-
-          # pips単位の損益計算（Bid/Askを使い分け）
-          price_diff = 0
+          # Bid/Ask価格の計算（ティックデータに含まれていない場合）
+          current_price = tick[:close]
+          bid_price = tick[:bid] || (current_price - (mt4_spread_points * pip_decimal / 2))
+          ask_price = tick[:ask] || (current_price + (mt4_spread_points * pip_decimal / 2))
+          
+          # ポジションの種類に応じた価格差計算（スプレッド考慮）
           if position[:type] == :buy
-            # 買いポジションはBid価格で決済
-            bid_price = tick[:bid] || (tick[:close] - (spread_pips / @params[:SpredKeisuu]))
-            price_diff = (bid_price - position[:open_price]) * @params[:SpredKeisuu]
+            # 買いポジション: Ask価格で購入、Bid価格で売却
+            entry_price = position[:open_price]  # 既にAsk価格と仮定
+            exit_price = bid_price               # 決済はBid価格
+            price_diff = exit_price - entry_price
           else
-            # 売りポジションはAsk価格で決済
-            ask_price = tick[:ask] || (tick[:close] + (spread_pips / @params[:SpredKeisuu]))
-            price_diff = (position[:open_price] - ask_price) * @params[:SpredKeisuu]
+            # 売りポジション: Bid価格で売却、Ask価格で買戻し
+            entry_price = position[:open_price]  # 既にBid価格と仮定
+            exit_price = ask_price               # 決済はAsk価格
+            price_diff = entry_price - exit_price
           end
-
-          # pipsからUSD損益計算（通貨ペアに応じた正確な計算）
-          pip_value_per_standard_lot = case symbol
-          when /USD$/ # USDが決済通貨の場合（例：GBPUSD）
-            10.0    # 1スタンダードロット = 10USD/pip
-          when /JPY$/ # JPYが決済通貨の場合（例：USDJPY）
-            10.0 / @params[:USDJPY_rate] # JPY建てをUSDに換算
+          
+          # pip数の計算
+          pip_diff = price_diff / pip_decimal
+          
+          # pip価値（通貨ペア別）
+          pip_value = case symbol
+            when /JPY$/ then 100.0  # JPYペアは1ロットあたり1000円/pip
+            else 1.0                # USDペアは1ロットあたり10ドル/pip
+          end
+          
+          # 通貨別の利益計算
+          if symbol =~ /JPY$/
+            # JPYペアは直接円建て計算
+            jpy_profit = pip_diff * pip_value * lot_size
+            usd_profit = jpy_profit / usdjpy_rate
           else
-            # その他のクロス通貨の場合、適切な計算が必要
-            # 例：EURGBPの場合は一度GBPに換算してからUSDに換算
-            10.0 # 単純化のため標準値を使用
+            # USDペアはドル建て計算後に円換算
+            usd_profit = pip_diff * pip_value * lot_size
+            jpy_profit = usd_profit * usdjpy_rate
           end
-
-          # ロットサイズに応じたpip価値を計算（1ロット=100,000単位基準）
-          lot_pip_value = position[:lot_size] * pip_value_per_standard_lot
-
-          # pips損益をUSD損益に変換
-          usd_profit = price_diff * lot_pip_value / @params[:SpredKeisuu]
-
-          # USD損益からJPY損益
-          jpy_profit = usd_profit * @params[:USDJPY_rate]
-
+          
+          # デバッグ出力
           if @debug_mode
-            puts "USDJPY_rate: #{@params[:USDJPY_rate]}"
-            puts "【利益計算】 Position: #{position[:type]}, Lot: #{position[:lot_size]}"
-            puts "lot_pip_value: #{position[:lot_size]} * #{pip_value_per_standard_lot} = #{lot_pip_value}"
-            puts "Position: #{position[:type]}, Lot: #{position[:lot_size]}"
-            puts "スプレッド: #{spread_pips} pips (#{spread_pips / @params[:SpredKeisuu]} 価格単位)"
-            puts "Open: #{position[:open_price]}, Close: #{position[:type] == :buy ? bid_price : ask_price}"
-            puts "Price diff: #{price_diff / @params[:SpredKeisuu]} (#{price_diff} pips)"
-            puts "USD profit: #{usd_profit}, JPY profit: #{jpy_profit}"
+            puts "===== 利益計算詳細（スプレッド考慮）====="
+            puts "取引: #{symbol} #{position[:type]} #{lot_size}ロット"
+            puts "エントリー: #{entry_price}, 決済: #{exit_price}"
+            puts "スプレッド: #{(ask_price - bid_price) / pip_decimal} pips"
+            puts "価格差: #{price_diff} (#{pip_diff} pips)"
+            puts "USD利益: $#{usd_profit.round(2)}"
+            puts "JPY利益: ¥#{jpy_profit.round(2)}"
           end
-          # 最終的な計算結果の返却前に通貨単位を明確にする
-          result = {
-            pips: price_diff / @params[:SpredKeisuu],
-            usd: usd_profit,
-            jpy: jpy_profit,
-            currency: return_currency  # どの通貨単位で返すかを明示
-          }
-  
-          # デバッグ情報を追加
-          if @debug_mode
-            puts "【利益計算】 Position: #{position[:type]}, Lot: #{position[:lot_size]}"
-            puts "  Pips: #{result[:pips]}, USD: #{result[:usd]}, JPY: #{result[:jpy]}"
-          end
-  
-          # 指定した通貨単位の値を返す
-          return return_currency == :USD ? result[:usd] : result[:jpy]
-
+          
+          # 結果を指定された通貨で返す
+          return return_currency == :USD ? usd_profit : jpy_profit
         end
 
         # トレーリングストップ開始
@@ -1057,7 +1023,7 @@ module MT4Backtester
             close_price: tick[:close],
             profit: profit_usd,      # USD単位で保存
             profit_jpy: profit_jpy,  # JPY単位も保存
-            currency: "USD",         # 明示的に通貨単位を記録
+            currency: "JPY",         # 明示的に通貨単位を記録
             position_count: @positions.size,
             exit_reason: get_exit_reason(position, tick)
           )

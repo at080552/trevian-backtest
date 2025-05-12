@@ -70,8 +70,11 @@ module MT4Backtester
           symbol = trade[:symbol] || 'GBPUSD' # シンボルがなければデフォルト値
 
     # 通貨単位を明示的に設定
-    trade[:currency] ||= "USD"
-    
+    #trade[:currency] ||= "USD"
+    # 通貨単位をJPYに統一
+    trade[:currency] = "JPY"
+    trade[:balance_currency] = "JPY"
+
     # JPY換算の利益も記録（存在しない場合）
     if !trade[:profit_jpy] && trade[:profit]
       trade[:profit_jpy] = trade[:profit] * @params[:USDJPY_rate]

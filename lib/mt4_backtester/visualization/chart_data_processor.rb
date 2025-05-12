@@ -145,14 +145,14 @@ module MT4Backtester
         @results[:trades].each do |trade|
     # エントリーポイントと決済ポイントを作成する前に取引データをチェック
     puts "処理中のトレード: #{trade.inspect}" if @debug_mode
-          # 通貨単位を明示的に取得（なければデフォルトでUSD）
-          currency = trade[:currency] || "USD"
+          # 通貨単位を明示的に取得（なければデフォルトでJPY）
+          currency = trade[:currency] || "JPY"
           # 利益のフォーマット準備
-          profit = trade[:profit]
+          profit = currency == "JPY" ? trade[:profit_jpy] : trade[:profit]
           profit_display = if profit
-            currency == "USD" ? 
-              "$#{format('%.5f', profit)}" : 
-              "¥#{format('%.2f', profit)}"
+            currency == "JPY" ? 
+              "¥#{format('%.2f', profit)}" : 
+              "$#{format('%.5f', profit)}"
           else
             nil
           end
@@ -178,13 +178,13 @@ module MT4Backtester
             type: trade[:type].to_s,
             action: 'exit',
             lot: trade[:lot_size],
-            profit: trade[:profit],
+            profit: trade[:profit_jpy] || trade[:profit],  # JPY単位を優先
             profit_display: profit_display,  # 表示用フォーマット済み文字列を追加
             reason: trade[:exit_reason] || "決済", # 決済理由
             account_balance: trade[:exit_balance] || nil, # 決済後の口座残高
             account_equity: trade[:exit_equity] || nil, # 決済時のエクイティ
             margin: trade[:exit_margin] || nil, # 決済時の必要証拠金
-            positions_count: trade[:exit_positions_count] || nil, # 決済後のポジション数
+            positions_count: trade[:exit_positions_count] || 0, # 決済後のポジション数
             currency: currency  # 通貨単位を追加
           }
           

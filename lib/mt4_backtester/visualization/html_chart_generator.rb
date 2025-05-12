@@ -997,7 +997,7 @@ HTML
         expected_payoff = total_trades > 0 ? (total_profit / total_trades).round(2) : 0
         
         stats_html = <<-HTML
-      <div class="stat-box">
+    <div class="stat-box">
         <div class="stat-title">取引回数</div>
         <div class="stat-value neutral">#{total_trades}</div>
       </div>
@@ -1007,11 +1007,11 @@ HTML
       </div>
       <div class="stat-box">
         <div class="stat-title">総利益</div>
-        <div class="stat-value #{total_profit >= 0 ? 'positive' : 'negative'}">$#{format_number(total_profit)}</div>
+        <div class="stat-value #{total_profit >= 0 ? 'positive' : 'negative'}">¥#{format_number(total_profit)}</div>
       </div>
       <div class="stat-box">
         <div class="stat-title">最大ドローダウン</div>
-        <div class="stat-value negative">$#{format_number(max_drawdown)}</div>
+        <div class="stat-value negative">¥#{format_number(max_drawdown)}</div>
       </div>
       <div class="stat-box">
         <div class="stat-title">プロフィットファクター</div>
@@ -1057,7 +1057,7 @@ end
     next if entry.nil? || exit.nil?
 
     # 通貨単位を取得（なければUSDをデフォルトに）
-    currency = exit[:currency] || entry[:currency] || "USD"
+    currency = exit[:currency] || entry[:currency] || "JPY"
 
           profit = exit[:profit] || 0
           profit_class = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : 'neutral')
@@ -1068,7 +1068,9 @@ end
       exit[:profit_display]
     else
       # なければここで作成
-      currency == "USD" ? "$#{format_number(profit)}" : "¥#{format_number(profit, 2)}"
+      currency == "JPY" ? 
+        "¥#{format('%.2f', profit)}" : 
+        "$#{format('%.5f', profit)}"
     end
 
           type_text = entry[:type] == 'buy' ? '買い' : '売り'
@@ -1089,7 +1091,7 @@ end
       "-"
     
     # ポジション数情報（あれば表示）
-    positions_count = entry[:positions_count] || entry[:entry_positions_count] || "-"
+    positions_count = entry[:positions_count] || entry[:entry_positions_count] || 0
     
           
           rows_html += <<-HTML

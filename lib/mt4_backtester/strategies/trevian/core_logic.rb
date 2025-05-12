@@ -902,6 +902,8 @@ module MT4Backtester
         end
 
         def calculate_position_profit(position, tick, return_currency = :JPY)
+          require "bigdecimal"
+          require "bigdecimal/util"
           # 基本情報
           lot_size = position[:lot_size]
           symbol = @params[:Symbol] || 'GBPUSD'
@@ -911,46 +913,54 @@ module MT4Backtester
           mt4_spread_points = 12.0  # 楽天MT4バックテストのスプレッド設定値
           
           # 通貨ペアに応じたスプレッド計算用の小数点位置
+          point_decimal = case symbol
+            when /JPY$/ then 0.001    # JPYペアは3桁目が1point
+            else 0.00001               # その他は5桁目が1point
+          end
+          
           pip_decimal = case symbol
-            when /JPY$/ then 0.01    # JPYペアは2桁目が1pip
-            else 0.0001              # その他の主要通貨ペアは4桁目が1pip
+            when /JPY$/ then 0.01     # JPYペアは2桁目が1pip
+            else 0.0001                # その他は4桁目が1pip
           end
           
           # Bid/Ask価格の計算（ティックデータに含まれていない場合）
           current_price = tick[:close]
-          bid_price = tick[:bid] || (current_price - (mt4_spread_points * pip_decimal / 2))
-          ask_price = tick[:ask] || (current_price + (mt4_spread_points * pip_decimal / 2))
+          bid_price = tick[:bid] || current_price
+          ask_price = tick[:ask] || (bid_price + (mt4_spread_points * point_decimal))
           
           # ポジションの種類に応じた価格差計算（スプレッド考慮）
           if position[:type] == :buy
-            # 買いポジション: Ask価格で購入、Bid価格で売却
-            entry_price = position[:open_price]  # 既にAsk価格と仮定
-            exit_price = bid_price               # 決済はBid価格
-            price_diff = exit_price - entry_price
+            entry_price = position[:open_price]  # Ask価格でのエントリー
+            exit_price = bid_price               # Bid価格での決済
+            #price_diff = exit_price - entry_price
+            price_diff = (exit_price.to_d - entry_price.to_d)
           else
-            # 売りポジション: Bid価格で売却、Ask価格で買戻し
-            entry_price = position[:open_price]  # 既にBid価格と仮定
-            exit_price = ask_price               # 決済はAsk価格
-            price_diff = entry_price - exit_price
+            # 売り決済は「Bid + spread(Ask)」なので必ず高い価格で買い戻す → コスト
+            entry_price = position[:open_price]  # Bid価格でのエントリー
+            exit_price = ask_price # ask_price = bid + spread
+            #price_diff = entry_price - exit_price
+            price_diff = (entry_price.to_d - exit_price.to_d)
           end
-          
+
           # pip数の計算
-          pip_diff = price_diff / pip_decimal
+          #pip_diff = price_diff / pip_decimal
+          pip_diff = price_diff / pip_decimal.to_d
           
           # pip価値（通貨ペア別）
           pip_value = case symbol
-            when /JPY$/ then 100.0  # JPYペアは1ロットあたり1000円/pip
-            else 1.0                # USDペアは1ロットあたり10ドル/pip
+            when /JPY$/ then 1000.0  # JPYペアは1ロットあたり1000円/pip
+            else 10.0                # USDペアは1ロットあたり10ドル/pip
           end
-          
+          profit = pip_diff * pip_value.to_d * lot_size.to_d
+
           # 通貨別の利益計算
           if symbol =~ /JPY$/
             # JPYペアは直接円建て計算
-            jpy_profit = pip_diff * pip_value * lot_size
+            jpy_profit = profit
             usd_profit = jpy_profit / usdjpy_rate
           else
             # USDペアはドル建て計算後に円換算
-            usd_profit = pip_diff * pip_value * lot_size
+            usd_profit = profit
             jpy_profit = usd_profit * usdjpy_rate
           end
           

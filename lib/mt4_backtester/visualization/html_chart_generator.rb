@@ -717,12 +717,6 @@ module MT4Backtester
         { 
           "targets": 7,
           "render": function(data, type, row) {
-            if (type === 'display') {
-              const profit = parseFloat(data.replace('$', ''));
-              return profit >= 0 
-                ? `<span class="positive">${data}</span>` 
-                : `<span class="negative">${data}</span>`;
-            }
             return data;
           }
         }
@@ -1060,7 +1054,8 @@ end
     currency = exit[:currency] || entry[:currency] || "JPY"
 
           profit = exit[:profit] || 0
-          profit_class = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : 'neutral')
+          #profit_class = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : 'neutral')
+          profit_class = profit > 0 ? 'positive' : "negative"
 
     # 1. 通貨単位に応じた利益表示文字列を作成
     profit_display = if exit[:profit_display]

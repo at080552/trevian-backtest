@@ -70,8 +70,6 @@ module MT4Backtester
           symbol = trade[:symbol] || 'GBPUSD' # シンボルがなければデフォルト値
 
     # 通貨単位を明示的に設定
-    #trade[:currency] ||= "USD"
-    # 通貨単位をJPYに統一
     trade[:currency] = "JPY"
     trade[:balance_currency] = "JPY"
 
@@ -79,7 +77,7 @@ module MT4Backtester
     if !trade[:profit_jpy] && trade[:profit]
       trade[:profit_jpy] = trade[:profit] * @params[:USDJPY_rate]
     end
-    
+
     # 小数点以下の精度を統一（丸め誤差を防止）
     trade[:profit] = trade[:profit].round(5) if trade[:profit]
     trade[:profit_jpy] = trade[:profit_jpy].round(2) if trade[:profit_jpy]
@@ -108,9 +106,9 @@ module MT4Backtester
           trade[:entry_equity] = running_balance
           trade[:entry_margin] = calculate_margin(trade[:lot_size], trade[:open_price])
           trade[:entry_free_margin] = running_balance - trade[:entry_margin]
-          
+
           # 決済後の残高計算
-          running_balance += trade[:profit]
+          running_balance += (trade[:profit_jpy] || trade[:profit] * @params[:USDJPY_rate])
           
           # 決済時のポジション管理（自分を除外）
           # このトレードを見つけて除外

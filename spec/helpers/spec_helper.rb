@@ -1,5 +1,14 @@
 require 'rspec'
 
+# Provide a minimal Dotenv stub if the gem is unavailable
+begin
+  require 'dotenv'
+rescue LoadError
+  module Dotenv
+    def self.load; end
+  end
+end
+
 # プロジェクトルートへのパスを取得
 project_root = File.expand_path('../..', __dir__)
 

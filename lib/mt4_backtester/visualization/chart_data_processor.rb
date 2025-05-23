@@ -99,8 +99,10 @@ module MT4Backtester
         max_balance = balance
         
         @results[:trades].each do |trade|
+          currency = trade[:currency] || @results[:params][:AccountCurrency] || 'USD'
+          profit = currency == 'JPY' ? (trade[:profit_jpy] || trade[:profit]) : trade[:profit]
           # 取引後の残高更新
-          balance += trade[:profit]
+          balance += profit
           
           # 最大残高の更新
           max_balance = balance if balance > max_balance

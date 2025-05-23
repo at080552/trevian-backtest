@@ -34,8 +34,8 @@ module MT4Backtester
         symbol ||= 'GBPUSD'
         timeframe ||= :M1
         
-        # ファイル内容をチェックして形式を判断（先頭数行を読み込む）
-        first_lines = File.readlines(file_path, 10).map(&:strip)
+        # ファイル内容をチェックして形式を判断（先頭10行のみ読み込む）
+        first_lines = File.foreach(file_path).first(10).map(&:strip)
         
         # MT4ティックデータ形式かどうかを判断
         if first_lines.any? && first_lines[0] =~ /^\d{8}\s\d{9},\d+\.\d+,\d+\.\d+/

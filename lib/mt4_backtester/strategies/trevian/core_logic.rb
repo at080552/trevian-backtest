@@ -422,11 +422,11 @@ end
           update_indicator_with_tick(tick)
         end
 
-        # カンドルデータを更新する処理
+        # ローソク足データを更新する処理
         def update_indicator_with_tick(tick)
           return unless @indicator_calculator
           
-          # 新しいカンドルを作成
+          # 新しいローソク足を作成
           new_candle = {
             time: tick[:time],
             open: tick[:open],
@@ -436,8 +436,8 @@ end
             volume: tick[:volume]
           }
           
-          # 新しいカンドルを追加するか、最後のカンドルを更新
-          if @candles.empty? || (tick[:time] - @candles.last[:time]) >= 60  # 1分以上経過したら新しいカンドル
+          # 新しいローソク足を追加するか、最後のローソク足を更新
+          if @candles.empty? || (tick[:time] - @candles.last[:time]) >= 60  # 1分以上経過したら新しいローソク足
             @candles << new_candle
           else
             # 同じ時間枠内なら高値・安値・終値を更新
@@ -662,7 +662,7 @@ end
   # ポジションごとのロット計算
   (1...positions).each do |j|
     # MT4と同じロット計算式
-    next_lot = (lot_array[j-1] * lot_coefficient + @params[:keisu_pulus_pips])
+    next_lot = (lot_array[j-1] * lot_coefficient + @params[:keisu_plus_pips])
     # 小数点以下2桁に切り上げ（MT4と同じ）
     lot_array[j] = (next_lot * 100).ceil / 100.0
     
@@ -848,10 +848,10 @@ end
           # Trevianの次のロットサイズ計算ロジック
           if @positions.size == 1
             # 最初の追加ポジション
-            next_lot = @positions.first[:lot_size] * @params[:next_order_keisu] + @params[:keisu_pulus_pips]
+            next_lot = @positions.first[:lot_size] * @params[:next_order_keisu] + @params[:keisu_plus_pips]
             
             # デバッグ出力
-            #puts "次のロット計算(初回): #{@positions.first[:lot_size]} * #{@params[:next_order_keisu]} + #{@params[:keisu_pulus_pips]} = #{next_lot}" if @debug_mode
+            #puts "次のロット計算(初回): #{@positions.first[:lot_size]} * #{@params[:next_order_keisu]} + #{@params[:keisu_plus_pips]} = #{next_lot}" if @debug_mode
           else
             # 2回目以降の追加ポジション
             last_pos = @positions.last
@@ -861,7 +861,7 @@ end
             if @positions.size >= @params[:position_x]
               profit_zz_total = (@positions.size - @params[:position_x]) * @params[:Profit_down_Percent]
               lot_adjust_rate = 1.0 + (profit_zz_total / 100.0)
-              keisu_plus = @params[:keisu_pulus_pips] * @positions.size
+              keisu_plus = @params[:keisu_plus_pips] * @positions.size
               
               # 調整後のロット
               next_lot = next_lot * lot_adjust_rate + keisu_plus
@@ -890,7 +890,7 @@ end
             
             # 次のロットサイズ調整係数も計算
             @lot_adjust_rate = 1.0 + (@params[:Profit_down_Percent] / 100.0)
-            @lot_keisu_plus = @params[:keisu_pulus_pips] * @positions.size
+            @lot_keisu_plus = @params[:keisu_plus_pips] * @positions.size
             
             case @state[:next_order]
             when 1  # 次は買い

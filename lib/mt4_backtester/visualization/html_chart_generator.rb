@@ -921,7 +921,7 @@ HTML
           [:Gap_down_Percent, "ギャップ縮小率（%）"],
           [:Profit_down_Percent, "利益縮小率（%）"],
           [:keisu_x, "注文係数"],
-          [:keisu_pulus_pips, "追加pips"],
+          [:keisu_plus_pips, "追加pips"],
           [:position_x, "ポジション調整数"],
           [:LosCutPosition, "ロスカットポジション数"],
           [:LosCutProfit, "ロスカット閾値（$）"],
@@ -979,7 +979,7 @@ HTML
         win_rate = total_trades > 0 ? (winning_trades.to_f / total_trades * 100).round(2) : 0
         
         # プロフィットファクター
-        if losing_trades > 0 && losing_trades > 0
+        if winning_trades > 0 && losing_trades > 0
           winning_sum = @chart_data.trade_points.select { |p| p[:action] == 'exit' && p[:profit] && p[:profit] > 0 }.sum { |p| p[:profit] }
           losing_sum = @chart_data.trade_points.select { |p| p[:action] == 'exit' && p[:profit] && p[:profit] <= 0 }.sum { |p| p[:profit] }.abs
           profit_factor = losing_sum > 0 ? (winning_sum / losing_sum).round(2) : 0

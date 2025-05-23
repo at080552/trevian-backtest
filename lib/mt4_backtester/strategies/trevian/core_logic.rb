@@ -44,6 +44,8 @@ module MT4Backtester
           @total_profit = 0
           @max_drawdown = 0
           @positions = []
+          @balance_history = [@account_info[:balance]]
+          @peak_balance = @account_info[:balance]
 
           @debug_mode = debug_mode
           @logger = nil
@@ -111,10 +113,16 @@ module MT4Backtester
         def update_balance(profit)
           old_balance = @account_info[:balance]
           @account_info[:balance] += profit
-          
+
           # デバッグ出力
           puts "CoreLogic: 残高更新 #{old_balance} -> #{@account_info[:balance]}" if @debug_mode
-          
+
+          # 残高履歴を保存
+          @balance_history << @account_info[:balance]
+
+          # ドローダウン計算
+          update_max_drawdown
+
           # アカウント情報への参照を保持している親クラスに通知
           @on_balance_update.call(@account_info[:balance]) if @on_balance_update
         end
@@ -1290,8 +1298,13 @@ end
 
         # 最大ドローダウン更新
         def update_max_drawdown
-          # 残高の履歴から最大ドローダウンを計算
-          # 簡易実装
+          return if @balance_history.empty?
+
+          current_balance = @balance_history.last
+          @peak_balance = current_balance if current_balance > @peak_balance
+
+          drawdown = @peak_balance - current_balance
+          @max_drawdown = drawdown if drawdown > @max_drawdown
         end
         
         # チケットID生成

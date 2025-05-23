@@ -48,4 +48,16 @@ RSpec.describe MT4Backtester::Strategies::Trevian::CoreLogic do
       expect(state[:trailing_stop_flag]).to eq(0)
     end
   end
+
+  describe "ドローダウン計測" do
+    it "残高履歴を記録して最大ドローダウンを更新する" do
+      expect(core_logic.instance_variable_get(:@balance_history)).to eq([300])
+
+      core_logic.update_balance(50)
+      core_logic.update_balance(-100)
+
+      expect(core_logic.instance_variable_get(:@max_drawdown)).to eq(100)
+      expect(core_logic.instance_variable_get(:@balance_history).last).to eq(250)
+    end
+  end
 end

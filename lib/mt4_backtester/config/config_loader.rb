@@ -21,7 +21,7 @@ module MT4Backtester
           lot_seigen: fetch_float('TREVIAN_LOT_SEIGEN', 100),
           lot_pos_seigen: fetch_int('TREVIAN_LOT_POS_SEIGEN', 30),
           keisu_x: fetch_float('TREVIAN_KEISU_X', 9.9),
-          keisu_pulus_pips: fetch_float('TREVIAN_KEISU_PULUS_PIPS', 0.35),
+          keisu_plus_pips: fetch_float('TREVIAN_KEISU_PLUS_PIPS', 0.35),
           position_x: fetch_int('TREVIAN_POSITION_X', 1),
           LosCutPosition: fetch_int('TREVIAN_LOSCUT_POSITION', 15),
           LosCutProfit: fetch_float('TREVIAN_LOSCUT_PROFIT', -900),

@@ -921,7 +921,7 @@ HTML
           [:Gap_down_Percent, "ギャップ縮小率（%）"],
           [:Profit_down_Percent, "利益縮小率（%）"],
           [:keisu_x, "注文係数"],
-          [:keisu_pulus_pips, "追加pips"],
+          [:keisu_plus_pips, "追加pips"],
           [:position_x, "ポジション調整数"],
           [:LosCutPosition, "ロスカットポジション数"],
           [:LosCutProfit, "ロスカット閾値（$）"],

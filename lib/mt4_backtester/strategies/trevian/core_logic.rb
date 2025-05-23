@@ -422,11 +422,11 @@ end
           update_indicator_with_tick(tick)
         end
 
-        # カンドルデータを更新する処理
+        # ローソク足データを更新する処理
         def update_indicator_with_tick(tick)
           return unless @indicator_calculator
           
-          # 新しいカンドルを作成
+          # 新しいローソク足を作成
           new_candle = {
             time: tick[:time],
             open: tick[:open],
@@ -436,8 +436,8 @@ end
             volume: tick[:volume]
           }
           
-          # 新しいカンドルを追加するか、最後のカンドルを更新
-          if @candles.empty? || (tick[:time] - @candles.last[:time]) >= 60  # 1分以上経過したら新しいカンドル
+          # 新しいローソク足を追加するか、最後のローソク足を更新
+          if @candles.empty? || (tick[:time] - @candles.last[:time]) >= 60  # 1分以上経過したら新しいローソク足
             @candles << new_candle
           else
             # 同じ時間枠内なら高値・安値・終値を更新

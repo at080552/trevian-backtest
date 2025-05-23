@@ -1031,8 +1031,9 @@ end
           # 決済理由を追加
           exit_reason = get_exit_reason(position, tick)
 
-          profit_usd = profit || calculate_position_profit(position, tick, :USD)
+          # profit は円建てで計算されているため、USD 利益は別途算出する
           profit_jpy = profit
+          profit_usd = calculate_position_profit(position, tick, :USD)
           
           # トレード記録に通貨単位情報を追加
           trade = position.merge(

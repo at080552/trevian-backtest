@@ -9,7 +9,7 @@ RSpec.describe MT4Backtester::Strategies::Trevian::CoreLogic do
       Gap_down_Percent: 0,
       Profit_down_Percent: 0,
       keisu_x: 9.9,
-      keisu_pulus_pips: 0.35,
+      keisu_plus_pips: 0.35,
       position_x: 1,
       LosCutPosition: 15,
       LosCutProfit: -900,

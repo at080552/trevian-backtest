@@ -26,6 +26,10 @@ module MT4Backtester
           @params[:next_order_keisu] = ((@params[:GapProfit] + @params[:Takeprofit]) / @params[:Takeprofit]) * @params[:keisu_x]
           @params[:profit_rate] = @params[:Takeprofit] / @params[:SpredKeisuu]
 
+          # 初期の福利を計算
+          @params[:fukuri] = (@params[:Start_Sikin].to_f / @params[:Start_Sikin].to_f).floor
+          @params[:fukuri] = 1 if @params[:fukuri] < 1
+
           # アカウント情報の初期化
           @account_info = {
             balance: @params[:Start_Sikin],
@@ -271,31 +275,29 @@ end
           end
 
           # 時間制御確認
-          time_control = check_time_control(tick)
+          #time_control = check_time_control(tick)
+          @close_flag = check_time_control(tick)  # 戻り値を確実に@close_flagに設定
           # ポジション管理（常に実行）
           manage_positions(tick)
           
           # 時間制御がアクティブな場合は新規取引を行わない
-          if time_control == 1
+          if @close_flag == 1
             # ポジションがある場合は決済を検討
             if !@positions.empty?
               # 金曜日や週末のポジション決済ロジックをここに実装
               # 実際のMT4版では金曜日の夜などに積極的な決済を行う
               all_delete(tick)
             end
-          else
-            # エントリーポイント判定
-            entry_signal = check_entry_conditions(tick)
-            record_signal(tick, entry_signal) if @debug_mode
-            # 新規エントリー
-            if @positions.empty? && entry_signal != :none
-              #open_position(tick, entry_signal)
-              open_first_position(tick, entry_signal)
-              # ここで追加ポジション判定をしない
-              return # 最初のポジション作成後は処理終了
-            end
-            # 既存ポジションがある場合のみ追加ポジション判定
-            if !@positions.empty?
+            return # 新規エントリーをスキップ
+          elsif @close_flag == 0
+            # 新規エントリー判定（close_flag == 0 の場合のみ）
+            if @positions.empty?
+              entry_signal = check_entry_conditions(tick)
+              if entry_signal != :none
+                open_first_position(tick, entry_signal)
+              end
+            else
+              # 既存ポジションがある場合のみ追加ポジション判定
               check_additional_positions(tick)
             end
           end
@@ -343,9 +345,14 @@ end
         
         # アカウント情報の更新
         def update_account_info(account_info)
-          # 資金に応じた調整
-          @params[:fukuri] = (account_info[:balance] / @params[:Start_Sikin]).floor
+          # 資金に応じた調整（円建て）
+          @params[:fukuri] = (account_info[:balance].to_f / @params[:Start_Sikin].to_f).floor
           @params[:fukuri] = 1 if @params[:fukuri] < 1
+          
+          # デバッグ出力
+          if @debug_mode
+            puts "福利更新: 残高=#{account_info[:balance]}円, 初期資金=#{@params[:Start_Sikin]}円, fukuri=#{@params[:fukuri]}"
+          end
         end
         
         # エントリー条件の確認
@@ -454,52 +461,25 @@ end
         def determine_trend
           # trend_hantei == 3 の場合（移動平均クロスオーバー）
           return :none if @candles.length < 15  # 十分なデータがない場合
-          # 移動平均クロスオーバーによる判定
-          ma_signal = @indicator_calculator.ma_crossover_check(:fast_ma, :slow_ma)
           
-  # 移動平均の値を直接取得
-  fast_ma_current = @indicator_calculator.value(:fast_ma)
-  fast_ma_prev = @indicator_calculator.previous_value(:fast_ma, 1)
-  slow_ma_current = @indicator_calculator.value(:slow_ma)
-  slow_ma_prev = @indicator_calculator.previous_value(:slow_ma, 1)
-  
-  # デバッグ出力
-  if @debug_mode
-    puts "=== #{@candles.last[:time]} MA判定（直接比較） ==="
-    puts "FastMA現在値: #{fast_ma_current}, 前回値: #{fast_ma_prev}"
-    puts "SlowMA現在値: #{slow_ma_current}, 前回値: #{slow_ma_prev}"
-    puts "現在: FastMA > SlowMA = #{fast_ma_current > slow_ma_current}"
-    puts "前回: FastMA > SlowMA = #{fast_ma_prev > slow_ma_prev}"
-    puts "MA判定結果(@indicator_calculator.previous_value(:slow_ma, 1)): #{ma_signal}"
-  end
-
-  # デバッグ情報の追加 - ここから
-  if @candles.last && @debug_mode
-    current_time = @candles.last[:time]
-    if current_time.month == 1 && current_time.day >= 10 && current_time.day <= 16
-      puts "  Signal: #{ma_signal}"
-      
-      # もし各ポジションの状態も確認したい場合は以下も追加
-      if @positions && !@positions.empty?
-        puts "  現在のポジション数: #{@positions.size}"
-        puts "  次の注文タイプ: #{@state[:next_order] == 1 ? '買い' : '売り'}"
-      end
-      puts "-------------------------------"
-    end
-  end
-  # デバッグ情報の追加 - ここまで
-
-  # 明示的な判定ロジック
-  if fast_ma_current > slow_ma_current && fast_ma_prev > slow_ma_prev
-    ma_signal = :buy
-  else
-    ma_signal = :sell
-  end
-  
-  # デバッグ出力（必要に応じて）
-  puts "MA判定結果: #{ma_signal}"
-
-          return ma_signal
+          # 移動平均の値を取得
+          fast_ma_current = @indicator_calculator.value(:fast_ma)
+          fast_ma_prev = @indicator_calculator.previous_value(:fast_ma, 1)
+          slow_ma_current = @indicator_calculator.value(:slow_ma)
+          slow_ma_prev = @indicator_calculator.previous_value(:slow_ma, 1)
+          
+          # MA値がnilの場合はエントリーしない
+          if fast_ma_current.nil? || fast_ma_prev.nil? || 
+            slow_ma_current.nil? || slow_ma_prev.nil?
+            return :none  # 売りではなく、エントリーなし
+          end
+          
+          # MT4と同じ判定ロジック
+          if fast_ma_current > slow_ma_current && fast_ma_prev > slow_ma_prev
+            return :buy
+          else
+            return :sell
+          end
         end
 
         def open_first_position(tick, type)
@@ -541,6 +521,17 @@ end
           # MT4版同様、次の指値注文をセット
           prepare_next_stop_order(type)
           
+          # MT4版と同じく、最初のポジション作成後に価格レベルを更新
+          @state[:first_order] = type == :buy ? 1 : 2
+          @state[:first_rate] = position[:open_price]
+          @state[:first_lots] = position[:lot_size]
+          
+          # 次の注文のための初期カウンタ設定
+          @state[:next_icount] = 0
+          
+          # ポジション状態の更新を確実に行う
+          update_position_state
+
           return position
         end
 
@@ -767,51 +758,53 @@ end
           end
         end
         
-        # MT4版と同じフラグベースの実装
         def check_additional_positions(tick)
-          next_finish_flag = 0
+          return if @positions.empty?
           
-          # 次のロットを計算
-          next_lot = calculate_next_lot_size
-          
-          # 制限チェック
-          if @state[:all_lots] + next_lot >= @params[:lot_seigen]
-            next_finish_flag = 1
+          # MT4版のNextJob()と同じロジック
+          # 最初のポジション情報を取得
+          first_pos = @positions.first
+          if first_pos[:type] == :buy
+            @state[:first_order] = 1
+            @state[:buy_rate] = first_pos[:open_price]
+            @state[:sell_rate] = @state[:buy_rate] - (@params[:GapProfit] / @params[:SpredKeisuu])
+          else
+            @state[:first_order] = 2
+            @state[:sell_rate] = first_pos[:open_price]
+            @state[:buy_rate] = @state[:sell_rate] + (@params[:GapProfit] / @params[:SpredKeisuu])
           end
-          if @positions.size >= @params[:lot_pos_seigen]
-            next_finish_flag = 1
+          
+          # 次の注文タイプを決定
+          if @positions.size == 1
+            @state[:next_order] = @state[:first_order] == 1 ? 2 : 1
           end
           
-          # 制限に達していなければポジション追加
-          if next_finish_flag == 0
-            add_position(tick, @state[:next_order] == 1 ? :buy : :sell)
+          # 価格到達チェック
+          if @state[:next_order] == 1  # 次は買い
+            if tick[:close] <= @state[:buy_rate]
+              next_lot = calculate_next_lot_size
+              if @state[:all_lots] + next_lot < @params[:lot_seigen] && 
+                @positions.size < @params[:lot_pos_seigen]
+                add_position(tick, :buy)
+                # 次の売りレベルを設定
+                @state[:next_order] = 2
+                adjust_gap_for_next_position
+              end
+            end
+          elsif @state[:next_order] == 2  # 次は売り
+            if tick[:close] >= @state[:sell_rate]
+              next_lot = calculate_next_lot_size
+              if @state[:all_lots] + next_lot < @params[:lot_seigen] && 
+                @positions.size < @params[:lot_pos_seigen]
+                add_position(tick, :sell)
+                # 次の買いレベルを設定
+                @state[:next_order] = 1
+                adjust_gap_for_next_position
+              end
+            end
           end
         end
 
-        # 追加ポジション判定
-        def check_additional_positions_org(tick)
-          return if @positions.empty? || @pending_orders.empty?
-          
-          # 保留中の指値注文をチェック
-          @pending_orders.each do |order|
-            execute = false
-            
-            if order[:type] == :buy && tick[:close] <= order[:price]
-              # 買い指値が発動
-              execute = true
-            elsif order[:type] == :sell && tick[:close] >= order[:price]
-              # 売り指値が発動
-              execute = true
-            end
-            
-            if execute
-              # 指値注文を執行
-              add_position(tick, order[:type])
-              @pending_orders.delete(order)
-            end
-          end
-        end
-        
         # 追加ポジション
         def add_position(tick, type)
           # ポジション数制限のチェック
@@ -923,101 +916,65 @@ end
         
         # 利益確認
         def check_profit(tick)
-          # Trevianの利益確認ロジック実装
+          return if @positions.empty?
+          
+          # 総損益計算（円建て）
+          total_profit_jpy = 0
+          @positions.each do |pos|
+            profit_jpy = calculate_position_profit(pos, tick, :JPY)
+            total_profit_jpy += profit_jpy
+          end
+          
+          # ロスカット判定（ポジション数に関係なく常にチェック）
+          if @positions.size >= @params[:LosCutPosition]
+            loss_cut_profit_jpy = @params[:LosCutProfit] + 
+                                  (@params[:LosCutPlus] * (@params[:fukuri] - 1))
+            
+            if total_profit_jpy < loss_cut_profit_jpy
+              puts "ロスカット実行: #{total_profit_jpy}円 < #{loss_cut_profit_jpy}円" if @debug_mode
+              all_delete(tick)
+              return
+            end
+          end
+          
+          # 利益確定チェック（最後のポジションのみ）
           profit_pips = @params[:Takeprofit]
           
-          # ポジション数に応じた利益調整
           if @positions.size > @params[:position_x]
             profit_zz_total = (@positions.size - @params[:position_x]) * @params[:Profit_down_Percent]
             profit_pips = @params[:Takeprofit] * (1 - (profit_zz_total / 100.0))
           end
           
-          # 最新のポジションで利益チェック
-          if @positions.last
-            current_profit = calculate_position_profit(@positions.last, tick)
-            
-            if current_profit >= profit_pips
-              # トレーリングストップ開始
-              start_trailing_stop(tick)
-            end
+          last_pos = @positions.last
+          current_profit_pips = calculate_position_profit(last_pos, tick, :pips)
+          
+          if current_profit_pips >= profit_pips
+            start_trailing_stop(tick)
           end
         end
 
         def calculate_position_profit(position, tick, return_currency = :JPY)
-          require "bigdecimal"
-          require "bigdecimal/util"
-          # 基本情報
           lot_size = position[:lot_size]
-          symbol = @params[:Symbol] || 'GBPUSD'
-          usdjpy_rate = @params[:USDJPY_rate] || 154.5
+          contract_size = 100000  # 1ロット = 10万通貨
           
-          # スプレッド（MT4の設定から）- 重要！
-          mt4_spread_points = 12.0  # 楽天MT4バックテストのスプレッド設定値
-          
-          # 通貨ペアに応じたスプレッド計算用の小数点位置
-          point_decimal = case symbol
-            when /JPY$/ then 0.001    # JPYペアは3桁目が1point
-            else 0.00001               # その他は5桁目が1point
-          end
-          
-          pip_decimal = case symbol
-            when /JPY$/ then 0.01     # JPYペアは2桁目が1pip
-            else 0.0001                # その他は4桁目が1pip
-          end
-          
-          # Bid/Ask価格の計算（ティックデータに含まれていない場合）
-          current_price = tick[:close]
-          bid_price = tick[:bid] || current_price
-          ask_price = tick[:ask] || (bid_price + (mt4_spread_points * point_decimal))
-          
-          # ポジションの種類に応じた価格差計算（スプレッド考慮）
+          # 単純な価格差計算（MT4と同じ）
           if position[:type] == :buy
-            entry_price = position[:open_price]  # Ask価格でのエントリー
-            exit_price = bid_price               # Bid価格での決済
-            #price_diff = exit_price - entry_price
-            price_diff = (exit_price.to_d - entry_price.to_d)
+            price_diff = tick[:close] - position[:open_price]
           else
-            # 売り決済は「Bid + spread(Ask)」なので必ず高い価格で買い戻す → コスト
-            entry_price = position[:open_price]  # Bid価格でのエントリー
-            exit_price = ask_price # ask_price = bid + spread
-            #price_diff = entry_price - exit_price
-            price_diff = (entry_price.to_d - exit_price.to_d)
-          end
-
-          # pip数の計算
-          #pip_diff = price_diff / pip_decimal
-          pip_diff = price_diff / pip_decimal.to_d
-          
-          # pip価値（通貨ペア別）
-          pip_value = case symbol
-            when /JPY$/ then 1000.0  # JPYペアは1ロットあたり1000円/pip
-            else 10.0                # USDペアは1ロットあたり10ドル/pip
-          end
-          profit = pip_diff * pip_value.to_d * lot_size.to_d
-
-          # 通貨別の利益計算
-          if symbol =~ /JPY$/
-            # JPYペアは直接円建て計算
-            jpy_profit = profit
-            usd_profit = jpy_profit / usdjpy_rate
-          else
-            # USDペアはドル建て計算後に円換算
-            usd_profit = profit
-            jpy_profit = usd_profit * usdjpy_rate
+            price_diff = position[:open_price] - tick[:close]
           end
           
-          # デバッグ出力
-          if @debug_mode
-            puts "===== 利益計算詳細（スプレッド考慮）====="
-            puts "取引: #{symbol} #{position[:type]} #{lot_size}ロット"
-            puts "エントリー: #{entry_price}, 決済: #{exit_price}"
-            puts "スプレッド: #{(ask_price - bid_price) / pip_decimal} pips"
-            puts "価格差: #{price_diff} (#{pip_diff} pips)"
-            puts "USD利益: $#{usd_profit.round(2)}"
-            puts "JPY利益: ¥#{jpy_profit.round(2)}"
+          # ドル建て利益
+          usd_profit = price_diff * lot_size * contract_size
+          
+          # 円建て利益
+          jpy_profit = usd_profit * (@params[:USDJPY_rate] || 155.0)
+          
+          # pips計算用（利益確認で使用）
+          if return_currency == :pips
+            return price_diff * @params[:SpredKeisuu]
           end
           
-          # 結果を指定された通貨で返す
           return return_currency == :USD ? usd_profit : jpy_profit
         end
 
@@ -1228,26 +1185,21 @@ end
         def check_loss_cut(tick)
           return if @positions.empty?
           
-          # ポジション数がLosCutPosition以上の場合、利益をチェック
           if @positions.size >= @params[:LosCutPosition]
-            total_profit = 0
-            # すべてのポジションの損益を計算（MT4と同様のシンプルな計算）
-            @positions.each do |pos|
-              if pos[:type] == :buy
-                profit = (tick[:close] - pos[:open_price]) * pos[:lot_size] * 100000
-              else
-                profit = (pos[:open_price] - tick[:close]) * pos[:lot_size] * 100000
-              end
-              total_profit += profit
-            end
-
-            # 福利計算による損失閾値の調整
-            loss_cut_profit = @params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1))
+            total_profit_jpy = 0  # 円建てで計算
             
-            if total_profit < loss_cut_profit
-              # ロスカットフラグを設定（MT4互換）
+            @positions.each do |pos|
+              # 円建てで利益を計算
+              profit_jpy = calculate_position_profit(pos, tick, :JPY)
+              total_profit_jpy += profit_jpy
+            end
+            
+            # ロスカット閾値（円建て）
+            loss_cut_profit_jpy = @params[:LosCutProfit] + (@params[:LosCutPlus] * (@params[:fukuri] - 1))
+            
+            if total_profit_jpy < loss_cut_profit_jpy
+              puts "ロスカット実行: 総損益 #{total_profit_jpy}円 < 閾値 #{loss_cut_profit_jpy}円" if @debug_mode
               @loss_cut_flag = 1
-              # すべてのポジションをクローズ
               all_delete(tick)
             end
           end

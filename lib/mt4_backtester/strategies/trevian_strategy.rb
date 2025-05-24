@@ -220,67 +220,165 @@ module MT4Backtester
         end
       end
       
+
+      # process_tick_data メソッドの修正
       def process_tick_data(tick_data)
         # テクニカル指標データの準備
         prepare_indicators(tick_data)
 
         # 各ティックを処理
         tick_data.each_with_index do |tick, index|
-          # 10ティックごとにプログレス表示
-          puts "ティック処理中: #{index}/#{tick_data.size}" if index % 1000 == 0 && index > 0
-          # 指標データの記録（1時間ごとなど、適切な間隔で）
-          if index % 60 == 0 || index == tick_data.size - 1
-            record_indicator_data(tick, index)
+          # プログレス表示
+          if index % 1000 == 0 && index > 0
+            puts "ティック処理中: #{index}/#{tick_data.size}"
           end
-
+          
           # アカウント情報更新
           update_account(tick)
           
-          # コアロジックに処理を委譲
+          # コアロジックに処理を委譲（ここでMA計算も更新される）
           @core_logic.process_tick(tick, @account)
+          
+          # 【修正】MA値の記録を毎分実行
+          current_minute = tick[:time].strftime('%Y-%m-%d %H:%M')
+          @last_record_minute ||= ""
+          
+          # 毎分または最後のティックで記録
+          if @last_record_minute != current_minute || index == tick_data.size - 1
+            record_indicator_data_safely(tick, index)
+            @last_record_minute = current_minute
+          end
+        end
+      end
+
+      # 新しい安全なデータ記録メソッド
+      def record_indicator_data_safely(tick, index)
+        return unless @core_logic && @core_logic.indicator_calculator
+        
+        begin
+          # MA計算に必要な最小データ数をチェック
+          candles = @core_logic.instance_variable_get(:@candles)
+          return unless candles && candles.size >= 14
+          
+          # MA インジケーターを取得
+          fast_ma_indicator = @core_logic.indicator_calculator.indicators[:fast_ma]
+          slow_ma_indicator = @core_logic.indicator_calculator.indicators[:slow_ma]
+          
+          return unless fast_ma_indicator && slow_ma_indicator
+          
+          # MA値を取得
+          fast_ma = fast_ma_indicator.current_value
+          slow_ma = slow_ma_indicator.current_value
+          
+          # 値の検証
+          current_price = tick[:close]
+          
+          # MA値が価格と異常に離れている場合は記録しない
+          if fast_ma && (fast_ma - current_price).abs > current_price * 0.5
+            puts "異常なFastMA値を検出: #{fast_ma} (価格: #{current_price})" if @debug_mode
+            return
+          end
+          
+          if slow_ma && (slow_ma - current_price).abs > current_price * 0.5
+            puts "異常なSlowMA値を検出: #{slow_ma} (価格: #{current_price})" if @debug_mode
+            return
+          end
+          
+          # 前回と同じ値が連続する場合の警告
+          if @indicators_data[:ma_fast].any?
+            last_fast_ma = @indicators_data[:ma_fast].last[:value]
+            if fast_ma && (fast_ma - last_fast_ma).abs < 0.000001
+              @consecutive_same_ma_count ||= 0
+              @consecutive_same_ma_count += 1
+              
+              if @consecutive_same_ma_count > 10 && @debug_mode
+                puts "警告: FastMAが#{@consecutive_same_ma_count}回連続で同じ値です"
+              end
+            else
+              @consecutive_same_ma_count = 0
+            end
+          end
+          
+          # 有効な値のみ記録
+          if fast_ma && fast_ma.is_a?(Numeric) && fast_ma.finite?
+            @indicators_data[:ma_fast] << {
+              time: tick[:time],
+              value: fast_ma.round(5)
+            }
+          end
+          
+          if slow_ma && slow_ma.is_a?(Numeric) && slow_ma.finite?
+            @indicators_data[:ma_slow] << {
+              time: tick[:time],
+              value: slow_ma.round(5)
+            }
+          end
+          
+          # デバッグ情報
+          if @debug_mode && (fast_ma || slow_ma)
+            puts "MA記録: #{tick[:time].strftime('%H:%M')} 価格=#{current_price.round(5)} FastMA=#{fast_ma&.round(5)} SlowMA=#{slow_ma&.round(5)}"
+          end
+          
+        rescue => e
+          puts "MA記録エラー: #{e.message}" if @debug_mode
+          puts e.backtrace.first(3) if @debug_mode
         end
       end
 
       def record_indicator_data(tick, index)
         # インジケーターが初期化されているか確認
         return unless @core_logic && @core_logic.respond_to?(:indicator_calculator) && @core_logic.indicator_calculator
-        
-        # インジケーターの値を取得
+
+        # 十分なデータがあるかチェック
+        return unless @core_logic.indicator_calculator.indicators
+
         begin
-          fast_ma = @core_logic.indicator_calculator.value(:fast_ma)
-          slow_ma = @core_logic.indicator_calculator.value(:slow_ma)
+          fast_ma_indicator = @core_logic.indicator_calculator.indicators[:fast_ma]
+          slow_ma_indicator = @core_logic.indicator_calculator.indicators[:slow_ma]
           
-          # モメンタム値を取得（エラー処理付き）
+          # データが十分にあるかチェック
+          if fast_ma_indicator && fast_ma_indicator.data.size >= 5  # 5期間MA用
+            fast_ma = fast_ma_indicator.current_value
+          end
+          
+          if slow_ma_indicator && slow_ma_indicator.data.size >= 14  # 14期間MA用
+            slow_ma = slow_ma_indicator.current_value
+          end
+          
+          # モメンタム値を取得
           momentum_value = nil
-          if @core_logic.indicator_calculator.indicators && 
-             @core_logic.indicator_calculator.indicators[:momentum]
+          if @core_logic.indicator_calculator.indicators[:momentum]
             momentum_indicator = @core_logic.indicator_calculator.indicators[:momentum]
-            
-            if momentum_indicator.respond_to?(:current_value)
+            if momentum_indicator.respond_to?(:current_value) && momentum_indicator.data.size >= 20
               momentum_value = momentum_indicator.current_value
-            elsif momentum_indicator.respond_to?(:data) && !momentum_indicator.data.empty?
-              momentum_value = momentum_indicator.data.last
             end
           end
           
-          # データを記録
-          @indicators_data[:ma_fast] << {
-            time: tick[:time],
-            value: fast_ma
-          } if fast_ma
+          # データを記録（nilでない場合のみ）
+          if fast_ma
+            @indicators_data[:ma_fast] << {
+              time: tick[:time],
+              value: fast_ma
+            }
+          end
           
-          @indicators_data[:ma_slow] << {
-            time: tick[:time],
-            value: slow_ma
-          } if slow_ma
+          if slow_ma
+            @indicators_data[:ma_slow] << {
+              time: tick[:time],
+              value: slow_ma
+            }
+          end
           
-          @indicators_data[:momentum] << {
-            time: tick[:time],
-            value: momentum_value
-          } if momentum_value
+          if momentum_value
+            @indicators_data[:momentum] << {
+              time: tick[:time],
+              value: momentum_value
+            }
+          end
           
         rescue => e
           puts "インジケーターデータの記録中にエラーが発生しました: #{e.message}" if @debug_mode
+          puts e.backtrace.first(3) if @debug_mode
         end
       end
 

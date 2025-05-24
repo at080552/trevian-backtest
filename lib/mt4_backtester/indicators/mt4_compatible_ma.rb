@@ -98,25 +98,38 @@ module MT4Backtester
       end
       
       # 単純移動平均（SMA）の計算
+      # calculate_sma メソッドにデバッグ機能を追加
       def calculate_sma(prices)
         @data = []
         
-        # 十分なデータがあるかチェック
         return @data if prices.length < @period
+        
+        # デバッグ: 入力価格の確認
+        if defined?(@debug_mode) && @debug_mode
+          puts "SMA計算: 期間=#{@period}, 価格数=#{prices.length}"
+          puts "最新5価格: #{prices.last(5)}" if prices.length >= 5
+        end
         
         # 各バーでのSMAを計算
         (0...prices.length).each do |i|
           if i < @period - 1
-            # 期間に満たない場合はnilをセット
             @data << nil
           else
             # 単純平均を計算
             sum = 0.0
-            (@period).times do |j|
+            @period.times do |j|
               idx = i - j
               sum += prices[idx]
             end
-            @data << (sum / @period)
+            sma_value = sum / @period
+            @data << sma_value
+            
+            # デバッグ: 計算過程の表示
+            if defined?(@debug_mode) && @debug_mode && i % 60 == 0
+              used_prices = []
+              @period.times { |j| used_prices << prices[i - j] }
+              puts "SMA[#{i}]: #{used_prices.map(&:round).join('+')} / #{@period} = #{sma_value.round(5)}"
+            end
           end
         end
         

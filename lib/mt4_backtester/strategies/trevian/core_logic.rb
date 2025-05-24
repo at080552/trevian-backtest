@@ -46,6 +46,9 @@ module MT4Backtester
           @positions = []
           @balance_history = [@account_info[:balance]]
           @peak_balance = @account_info[:balance]
+          @first_entry_done = false  # 最初のエントリー完了フラグを追加
+          @buy_order_executed = false
+          @sell_order_executed = false
 
           @debug_mode = debug_mode
           @logger = nil
@@ -287,22 +290,29 @@ end
           @close_flag = check_time_control(tick)  # 戻り値を確実に@close_flagに設定
           # ポジション管理（常に実行）
           manage_positions(tick)
-          
+
+  # デバッグ出力を追加
+  if @debug_mode
+    puts "=== エントリー判定 ==="
+    puts "ポジション数: #{@positions.size}"
+    puts "close_flag: #{@close_flag}"
+    puts "first_entry_done: #{@first_entry_done}"
+    puts "MA値: fast=#{@indicator_calculator&.value(:fast_ma)}, slow=#{@indicator_calculator&.value(:slow_ma)}"
+  end
+
           # 時間制御がアクティブな場合は新規取引を行わない
           if @close_flag == 1
-            # ポジションがある場合は決済を検討
             if !@positions.empty?
-              # 金曜日や週末のポジション決済ロジックをここに実装
-              # 実際のMT4版では金曜日の夜などに積極的な決済を行う
               all_delete(tick)
             end
-            return # 新規エントリーをスキップ
+            return
           elsif @close_flag == 0
-            # 新規エントリー判定（close_flag == 0 の場合のみ）
-            if @positions.empty?
+            # 新規エントリー判定（最初の1回のみ）
+            if @positions.empty? && !@first_entry_done
               entry_signal = check_entry_conditions(tick)
               if entry_signal != :none
                 open_first_position(tick, entry_signal)
+                @first_entry_done = true  # フラグを立てる
               end
             else
               # 既存ポジションがある場合のみ追加ポジション判定
@@ -428,43 +438,120 @@ end
           end
           # ティックデータからローソク足を更新
           update_indicator_with_tick(tick)
+
+  # デバッグ：移動平均の計算状況を確認
+  if @debug_mode
+    puts "=== 移動平均計算状況 ==="
+    puts "ローソク足数: #{@candles.size}"
+    puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
+    puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
+    
+    if @candles.size >= 14
+      puts "14期間分のデータあり - SlowMAが計算されるはず"
+      
+      # 直接計算してみる
+      if @candles.size >= 14
+        recent_closes = @candles.last(14).map { |c| c[:close] }
+        manual_slow_ma = recent_closes.sum / 14.0
+        puts "手動計算SlowMA: #{manual_slow_ma}"
+      end
+    else
+      puts "データ不足: SlowMAには#{14 - @candles.size}個不足"
+    end
+  end
+
         end
 
-        # ローソク足データを更新する処理
         def update_indicator_with_tick(tick)
           return unless @indicator_calculator
           
-          # 新しいローソク足を作成
-          new_candle = {
-            time: tick[:time],
-            open: tick[:open],
-            high: tick[:high],
-            low: tick[:low],
-            close: tick[:close],
-            volume: tick[:volume]
-          }
-          
-          # 新しいローソク足を追加するか、最後のローソク足を更新
-          if @candles.empty? || (tick[:time] - @candles.last[:time]) >= 60  # 1分以上経過したら新しいローソク足
-            @candles << new_candle
-          else
-            # 同じ時間枠内なら高値・安値・終値を更新
-            last_candle = @candles.last
-            last_candle[:high] = [last_candle[:high], tick[:high]].max
-            last_candle[:low] = [last_candle[:low], tick[:low]].min
-            last_candle[:close] = tick[:close]
-            last_candle[:volume] += tick[:volume]
+          # ティックデータの検証
+          unless tick[:close] && tick[:time]
+            puts "無効なティックデータをスキップ: #{tick.inspect}" if @debug_mode
+            return
           end
           
-          # 一定数以上になったら古いデータを削除（メモリ効率化）
+          # 分単位での時間正規化
+          current_minute = Time.new(
+            tick[:time].year, tick[:time].month, tick[:time].day,
+            tick[:time].hour, tick[:time].min, 0
+          )
+          
+          if @candles.empty?
+            # 最初のローソク足を作成
+            new_candle = {
+              time: current_minute,
+              open: tick[:close],
+              high: tick[:close],
+              low: tick[:close],
+              close: tick[:close],
+              volume: tick[:volume] || 1
+            }
+            @candles << new_candle
+            
+            if @debug_mode
+              puts "初回ローソク足作成: 時間=#{current_minute.strftime('%H:%M')}, 価格=#{tick[:close]}"
+            end
+          else
+            last_candle = @candles.last
+            last_minute = Time.new(
+              last_candle[:time].year, last_candle[:time].month, last_candle[:time].day,
+              last_candle[:time].hour, last_candle[:time].min, 0
+            )
+            
+            if current_minute > last_minute
+              # 新しい分に入った - 新しいローソク足を作成
+              new_candle = {
+                time: current_minute,
+                open: tick[:close],
+                high: tick[:close],
+                low: tick[:close],
+                close: tick[:close],
+                volume: tick[:volume] || 1
+              }
+              @candles << new_candle
+              
+              if @debug_mode
+                puts "新規ローソク足: #{current_minute.strftime('%H:%M')} 価格=#{tick[:close]} (前回MA: #{@indicator_calculator.value(:fast_ma)&.round(5)})"
+              end
+            else
+              # 同じ分内 - 既存ローソク足を更新
+              last_candle[:high] = [last_candle[:high], tick[:close]].max
+              last_candle[:low] = [last_candle[:low], tick[:close]].min
+              last_candle[:close] = tick[:close]  # 最新価格で更新
+              last_candle[:volume] = (last_candle[:volume] || 0) + (tick[:volume] || 1)
+            end
+          end
+          
+          # 古いデータの削除
           if @candles.length > 500
             @candles.shift
           end
           
           # インジケーターを更新
           @indicator_calculator.set_candles(@candles)
+          
+          # デバッグ: MA計算完了後の値確認
+          if @debug_mode && @candles.length >= 14
+            fast_ma = @indicator_calculator.value(:fast_ma)
+            slow_ma = @indicator_calculator.value(:slow_ma)
+            
+            # 異常値のチェック
+            if fast_ma && (fast_ma - tick[:close]).abs < 0.00001
+              puts "!!! MA異常: FastMA=#{fast_ma} が価格=#{tick[:close]}と同じです"
+            end
+            
+            if @candles.length % 60 == 0  # 60分ごとに詳細出力
+              puts "=== MA状態確認 (#{@candles.length}本目) ==="
+              puts "現在価格: #{tick[:close]}"
+              puts "FastMA: #{fast_ma&.round(5)}"
+              puts "SlowMA: #{slow_ma&.round(5)}"
+              puts "最新5本の終値: #{@candles.last(5).map { |c| c[:close].round(5) }}"
+              puts "======================================="
+            end
+          end
         end
-        
+
         # トレンド判定
         def determine_trend
           # trend_hantei == 3 の場合（移動平均クロスオーバー）
@@ -475,17 +562,31 @@ end
           fast_ma_prev = @indicator_calculator.previous_value(:fast_ma, 1)
           slow_ma_current = @indicator_calculator.value(:slow_ma)
           slow_ma_prev = @indicator_calculator.previous_value(:slow_ma, 1)
-          
+
+  if @debug_mode
+    puts "=== トレンド判定詳細 ==="
+    puts "ローソク足数: #{@candles.length}"
+    puts "FastMA現在: #{fast_ma_current}, 前回: #{fast_ma_prev}"
+    puts "SlowMA現在: #{slow_ma_current}, 前回: #{slow_ma_prev}"
+  end
+
           # MA値がnilの場合はエントリーしない
           if fast_ma_current.nil? || fast_ma_prev.nil? || 
             slow_ma_current.nil? || slow_ma_prev.nil?
+    if @debug_mode
+      puts "MA値がnilのためエントリーなし"
+      puts "  FastMA nil?: #{fast_ma_current.nil?}, #{fast_ma_prev.nil?}"
+      puts "  SlowMA nil?: #{slow_ma_current.nil?}, #{slow_ma_prev.nil?}"
+    end
             return :none  # 売りではなく、エントリーなし
           end
-          
+
           # MT4と同じ判定ロジック
           if fast_ma_current > slow_ma_current && fast_ma_prev > slow_ma_prev
+            puts "トレンド判定: 買い (FastMA > SlowMA)" if @debug_mode
             return :buy
           else
+            puts "トレンド判定: 売り (FastMA <= SlowMA)" if @debug_mode
             return :sell
           end
         end
@@ -620,9 +721,22 @@ end
     puts "LosCutPlus: #{@params[:LosCutPlus]}, fukuri: #{@params[:fukuri]}"
     puts "MinusLot: #{@params[:MinusLot]}, アカウント残高: #{@account_info[:balance]}"  
   end
+ if @debug_mode
+    puts "=== ロット計算詳細デバッグ ==="
+    puts "gap: #{gap}, profit: #{profit}, max_lot: #{max_lot}, positions: #{positions}"
+    puts "keisu_x: #{@params[:keisu_x]}, keisu_plus_pips: #{@params[:keisu_plus_pips]}"
+    puts "lot_coefficient: #{((gap + profit) / profit) * @params[:keisu_x]}"
+  end
           # Trevianのロットサイズ計算（極利計算）
           start_lot = 0.01
           lot_coefficient = ((gap + profit) / profit) * @params[:keisu_x]
+
+  # 係数の確認
+  if @debug_mode
+    puts "計算されたlot_coefficient: #{lot_coefficient}"
+    puts "期待値: #{((103.2 + 185.4) / 185.4) * 1.3} = 2.023..."
+  end
+
           next_order_keisu = lot_coefficient  # MT4の "次の注文係数" 変数を再現
           puts "次の注文係数: #{next_order_keisu}"
 
@@ -671,9 +785,19 @@ end
   (1...positions).each do |j|
     # MT4と同じロット計算式
     next_lot = (lot_array[j-1] * lot_coefficient + @params[:keisu_plus_pips])
+
+    if @debug_mode
+      puts "ロット計算[#{j}]: #{lot_array[j-1]} * #{lot_coefficient} + #{@params[:keisu_plus_pips]} = #{next_lot}"
+      puts "  切り上げ前: #{next_lot}, 切り上げ後: #{(next_lot * 100).ceil / 100.0}"
+    end
+
     # 小数点以下2桁に切り上げ（MT4と同じ）
     lot_array[j] = (next_lot * 100).ceil / 100.0
-    
+
+      if @debug_mode && test_start_lot == 0.01
+        puts "  切り上げ後: #{lot_array[j]}"
+      end
+
     # MT4と同じポジション分類ロジック
     if positions == 2 || positions == 4 || positions == 6 || positions == 8
       if j % 2 == 1  # ポジション2, 4, 6のロット
@@ -785,29 +909,45 @@ end
           # 次の注文タイプを決定
           if @positions.size == 1
             @state[:next_order] = @state[:first_order] == 1 ? 2 : 1
+            # 新しい注文レベルなので該当フラグのみリセット
+            if @state[:next_order] == 1
+              @buy_order_executed = false
+            else
+              @sell_order_executed = false
+            end
           end
           
-          # 価格到達チェック
+          # 価格到達チェック（約定フラグで制御）
           if @state[:next_order] == 1  # 次は買い
-            if tick[:close] <= @state[:buy_rate]
+            if tick[:close] <= @state[:buy_rate] && !@buy_order_executed
               next_lot = calculate_next_lot_size
               if @state[:all_lots] + next_lot < @params[:lot_seigen] && 
                 @positions.size < @params[:lot_pos_seigen]
+                
+                puts "買い約定: 価格=#{tick[:close]}, 指値=#{@state[:buy_rate]}, ロット=#{next_lot}" if @debug_mode
+                
                 add_position(tick, :buy)
+                @buy_order_executed = true  # 約定フラグを立てる
                 # 次の売りレベルを設定
                 @state[:next_order] = 2
                 adjust_gap_for_next_position
+                #@sell_order_executed = false  # 次の売り注文用にリセット
               end
             end
           elsif @state[:next_order] == 2  # 次は売り
-            if tick[:close] >= @state[:sell_rate]
+            if tick[:close] >= @state[:sell_rate] && !@sell_order_executed
               next_lot = calculate_next_lot_size
               if @state[:all_lots] + next_lot < @params[:lot_seigen] && 
                 @positions.size < @params[:lot_pos_seigen]
+                
+                puts "売り約定: 価格=#{tick[:close]}, 指値=#{@state[:sell_rate]}, ロット=#{next_lot}" if @debug_mode
+                
                 add_position(tick, :sell)
+                @sell_order_executed = true  # 約定フラグを立てる
                 # 次の買いレベルを設定
                 @state[:next_order] = 1
                 adjust_gap_for_next_position
+                #@buy_order_executed = false  # 次の買い注文用にリセット
               end
             end
           end
@@ -1287,13 +1427,13 @@ end
           @state[:trailing_stop_flag] = 0
           @state[:last_ticket] = 0
           @state[:last_lots] = 0
-          
+
           # ロスカットフラグをリセット
           @all_delete_flag = 0
-          
+
           # 状態更新
           update_position_state
-          
+          @first_entry_done = false  # ポジション全削除時にフラグをリセット
           puts "すべてのポジションをクローズしました" if @debug_mode
         end
 

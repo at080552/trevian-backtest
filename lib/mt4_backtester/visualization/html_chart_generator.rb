@@ -839,7 +839,9 @@ HTML
         # 移動平均線データセット
         if @chart_data.indicator_data[:ma_fast] && !@chart_data.indicator_data[:ma_fast].empty?
           ma_fast_data = JSON.generate(@chart_data.indicator_data[:ma_fast].map do |point|
-            { x: point[:time].strftime('%Y-%m-%d %H:%M'), y: point[:value] }
+            # 時間フォーマットを統一
+            time_str = point[:time].is_a?(String) ? point[:time] : point[:time].strftime('%Y-%m-%d %H:%M')
+            { x: time_str, y: point[:value] }
           end)
           
           datasets << %{
@@ -857,7 +859,8 @@ HTML
         
         if @chart_data.indicator_data[:ma_slow] && !@chart_data.indicator_data[:ma_slow].empty?
           ma_slow_data = JSON.generate(@chart_data.indicator_data[:ma_slow].map do |point|
-            { x: point[:time].strftime('%Y-%m-%d %H:%M'), y: point[:value] }
+            time_str = point[:time].is_a?(String) ? point[:time] : point[:time].strftime('%Y-%m-%d %H:%M')
+            { x: time_str, y: point[:value] }
           end)
           
           datasets << %{

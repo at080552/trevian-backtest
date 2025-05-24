@@ -52,24 +52,84 @@ module MT4Backtester
       # 特定のインデックスの移動平均値を取得（MT4のiMA関数と同様）
       # @param index [Integer] 取得したいバーのインデックス（0が最新）
       # @return [Float, nil] 移動平均値
-      def value(index = 0)
-        # 負のインデックスは配列の後ろから
-        idx = index < 0 ? @data.length + index : @data.length - 1 - index
-        return nil if idx < 0 || idx >= @data.length
-        @data[idx]
-      end
-      
-      # 現在の値を取得
+
       def current_value
-        @data.empty? ? nil : @data.last
+        return nil if @data.empty?
+        
+        # 最新の有効な値を取得
+        @data.reverse.each do |value|
+          return value if value && value.is_a?(Numeric) && value.finite?
+        end
+        
+        nil
       end
-      
+
       # 前回の値を取得
       def previous_value(steps_back = 1)
         return nil if @data.length <= steps_back
-        @data[-1 - steps_back]
+        
+        # 指定されたステップ数だけ前の有効な値を取得
+        index = @data.length - 1 - steps_back
+        return nil if index < 0
+        
+        value = @data[index]
+        return value if value && value.is_a?(Numeric) && value.finite?
+        
+        nil
       end
-      
+
+      # 特定のインデックスの移動平均値を取得（MT4のiMA関数と同様）
+      def value(index = 0)
+        return nil if @data.empty?
+        
+        # 負のインデックスは配列の後ろから
+        if index < 0
+          idx = @data.length + index
+        else
+          # MT4風のインデックス（0が最新）
+          idx = @data.length - 1 - index
+        end
+        
+        return nil if idx < 0 || idx >= @data.length
+        
+        value = @data[idx]
+        return value if value && value.is_a?(Numeric) && value.finite?
+        
+        nil
+      end
+
+      # データの有効性をチェックするメソッドを追加
+      def has_valid_data?
+        return false if @data.empty?
+        
+        # 最新の10個のデータをチェック
+        recent_data = @data.last(10).compact
+        return false if recent_data.empty?
+        
+        # すべて同じ値でないかチェック
+        first_value = recent_data.first
+        all_same = recent_data.all? { |v| (v - first_value).abs < 0.000001 }
+        
+        !all_same
+      end
+
+      # デバッグ用：データの統計情報を取得
+      def debug_info
+        return "No data" if @data.empty?
+        
+        valid_data = @data.compact
+        return "No valid data" if valid_data.empty?
+        
+        {
+          total_count: @data.length,
+          valid_count: valid_data.length,
+          min: valid_data.min,
+          max: valid_data.max,
+          latest: current_value,
+          has_variation: has_valid_data?
+        }
+      end
+
       private
       
       # ローソク足から価格データを抽出
@@ -108,6 +168,7 @@ module MT4Backtester
         if defined?(@debug_mode) && @debug_mode
           puts "SMA計算: 期間=#{@period}, 価格数=#{prices.length}"
           puts "最新5価格: #{prices.last(5)}" if prices.length >= 5
+          puts "全価格範囲: #{prices.min} - #{prices.max}"
         end
         
         # 各バーでのSMAを計算
@@ -115,21 +176,41 @@ module MT4Backtester
           if i < @period - 1
             @data << nil
           else
-            # 単純平均を計算
+            # 単純平均を計算 - 正しい順序で計算
             sum = 0.0
-            @period.times do |j|
-              idx = i - j
-              sum += prices[idx]
-            end
-            sma_value = sum / @period
-            @data << sma_value
+            used_prices = []
             
-            # デバッグ: 計算過程の表示
-            if defined?(@debug_mode) && @debug_mode && i % 60 == 0
-              used_prices = []
-              @period.times { |j| used_prices << prices[i - j] }
-              puts "SMA[#{i}]: #{used_prices.map(&:round).join('+')} / #{@period} = #{sma_value.round(5)}"
+            @period.times do |j|
+              idx = i - (@period - 1) + j  # 正しいインデックス計算
+              if idx >= 0 && idx < prices.length
+                sum += prices[idx]
+                used_prices << prices[idx]
+              end
             end
+            
+            # ゼロ除算チェック
+            if used_prices.length > 0
+              sma_value = sum / used_prices.length
+              @data << sma_value
+              
+              # デバッグ: 計算過程の表示（重要なポイントのみ）
+              if defined?(@debug_mode) && @debug_mode && (i == @period - 1 || i % 100 == 0)
+                puts "SMA[#{i}]: 使用価格数=#{used_prices.length}, 合計=#{sum.round(5)}, SMA=#{sma_value.round(5)}"
+                puts "  価格範囲: #{used_prices.min.round(5)} - #{used_prices.max.round(5)}"
+              end
+            else
+              @data << nil
+            end
+          end
+        end
+        
+        # 最終確認
+        if defined?(@debug_mode) && @debug_mode
+          non_nil_data = @data.compact
+          if non_nil_data.any?
+            puts "SMA計算完了: 有効データ数=#{non_nil_data.length}, 範囲=#{non_nil_data.min.round(5)} - #{non_nil_data.max.round(5)}"
+          else
+            puts "警告: SMA計算で有効なデータが生成されませんでした"
           end
         end
         

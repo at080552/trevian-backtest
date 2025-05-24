@@ -412,15 +412,18 @@ end
         def prepare_indicators(tick)
           # この部分を実装する必要があります
           if @indicator_calculator.nil?
-            @indicator_calculator = MT4Backtester::Indicators::IndicatorCalculator.new
+            @indicator_calculator = MT4Backtester::Indicators::IndicatorCalculator.new(@debug_mode)
             
-            # Trevianで使用される移動平均を追加(旧コード)
-            #@indicator_calculator.add_ma(:fast_ma, 5)  # 短期移動平均（5期間）
-            #@indicator_calculator.add_ma(:slow_ma, 14) # 長期移動平均（14期間）
-            # 新しいMT4互換クラスを使用：
             # MT4互換のMAクラスのインスタンスを作成
             fast_ma = MT4Backtester::Indicators::MT4CompatibleMA.new(5, :sma, :close)
             slow_ma = MT4Backtester::Indicators::MT4CompatibleMA.new(14, :sma, :close)
+            
+            # デバッグモードを明示的に設定
+            if @debug_mode
+              fast_ma.instance_variable_set(:@debug_mode, true)
+              slow_ma.instance_variable_set(:@debug_mode, true)
+              puts "MovingAverageインジケーターをデバッグモードで初期化"
+            end
             
             # インジケーターとして追加
             @indicator_calculator.add_indicator(:fast_ma, fast_ma)
@@ -435,31 +438,58 @@ end
             rescue => e
               puts "モメンタム指標の追加に失敗しました: #{e.message}" if @debug_mode
             end
+            
+            puts "インジケーター初期化完了: FastMA(5), SlowMA(14)" if @debug_mode
           end
+          
           # ティックデータからローソク足を更新
           update_indicator_with_tick(tick)
 
-  # デバッグ：移動平均の計算状況を確認
-  if @debug_mode
-    puts "=== 移動平均計算状況 ==="
-    puts "ローソク足数: #{@candles.size}"
-    puts "FastMA: #{@indicator_calculator.value(:fast_ma)}"
-    puts "SlowMA: #{@indicator_calculator.value(:slow_ma)}"
-    
-    if @candles.size >= 14
-      puts "14期間分のデータあり - SlowMAが計算されるはず"
-      
-      # 直接計算してみる
-      if @candles.size >= 14
-        recent_closes = @candles.last(14).map { |c| c[:close] }
-        manual_slow_ma = recent_closes.sum / 14.0
-        puts "手動計算SlowMA: #{manual_slow_ma}"
-      end
-    else
-      puts "データ不足: SlowMAには#{14 - @candles.size}個不足"
-    end
-  end
-
+          # デバッグ：移動平均の計算状況を確認
+          if @debug_mode
+            puts "=== 移動平均計算状況 ==="
+            puts "ローソク足数: #{@candles.size}"
+            
+            fast_ma_val = @indicator_calculator.value(:fast_ma)
+            slow_ma_val = @indicator_calculator.value(:slow_ma)
+            
+            puts "FastMA: #{fast_ma_val ? fast_ma_val.round(5) : 'nil'}"
+            puts "SlowMA: #{slow_ma_val ? slow_ma_val.round(5) : 'nil'}"
+            
+            if @candles.size >= 14
+              puts "14期間分のデータあり - SlowMAが計算されるはず"
+              
+              # 直接計算してみる
+              if @candles.size >= 14
+                recent_closes = @candles.last(14).map { |c| c[:close] }
+                manual_slow_ma = recent_closes.sum / 14.0
+                puts "手動計算SlowMA: #{manual_slow_ma.round(5)}"
+                puts "実際のSlowMA: #{slow_ma_val ? slow_ma_val.round(5) : 'nil'}"
+                
+                # 5期間の手動計算も
+                if @candles.size >= 5
+                  recent_5_closes = @candles.last(5).map { |c| c[:close] }
+                  manual_fast_ma = recent_5_closes.sum / 5.0
+                  puts "手動計算FastMA: #{manual_fast_ma.round(5)}"
+                  puts "実際のFastMA: #{fast_ma_val ? fast_ma_val.round(5) : 'nil'}"
+                end
+              end
+            else
+              puts "データ不足: SlowMAには#{14 - @candles.size}個不足"
+            end
+            
+            # インジケーターの詳細情報
+            fast_ma_indicator = @indicator_calculator.indicators[:fast_ma]
+            slow_ma_indicator = @indicator_calculator.indicators[:slow_ma]
+            
+            if fast_ma_indicator.respond_to?(:debug_info)
+              puts "FastMA詳細: #{fast_ma_indicator.debug_info}"
+            end
+            
+            if slow_ma_indicator.respond_to?(:debug_info)
+              puts "SlowMA詳細: #{slow_ma_indicator.debug_info}"
+            end
+          end
         end
 
         def update_indicator_with_tick(tick)
@@ -477,20 +507,27 @@ end
             tick[:time].hour, tick[:time].min, 0
           )
           
+          # 価格データの有効性チェック
+          current_price = tick[:close].to_f
+          if current_price <= 0
+            puts "無効な価格データをスキップ: #{current_price}" if @debug_mode
+            return
+          end
+          
           if @candles.empty?
             # 最初のローソク足を作成
             new_candle = {
               time: current_minute,
-              open: tick[:close],
-              high: tick[:close],
-              low: tick[:close],
-              close: tick[:close],
+              open: current_price,
+              high: current_price,
+              low: current_price,
+              close: current_price,
               volume: tick[:volume] || 1
             }
             @candles << new_candle
             
             if @debug_mode
-              puts "初回ローソク足作成: 時間=#{current_minute.strftime('%H:%M')}, 価格=#{tick[:close]}"
+              puts "初回ローソク足作成: 時間=#{current_minute.strftime('%H:%M')}, 価格=#{current_price}"
             end
           else
             last_candle = @candles.last
@@ -503,50 +540,68 @@ end
               # 新しい分に入った - 新しいローソク足を作成
               new_candle = {
                 time: current_minute,
-                open: tick[:close],
-                high: tick[:close],
-                low: tick[:close],
-                close: tick[:close],
+                open: current_price,
+                high: current_price,
+                low: current_price,
+                close: current_price,
                 volume: tick[:volume] || 1
               }
               @candles << new_candle
               
               if @debug_mode
-                puts "新規ローソク足: #{current_minute.strftime('%H:%M')} 価格=#{tick[:close]} (前回MA: #{@indicator_calculator.value(:fast_ma)&.round(5)})"
+                puts "新規ローソク足: #{current_minute.strftime('%H:%M')} 価格=#{current_price} (価格変化: #{(current_price - last_candle[:close]).round(5)})"
               end
             else
               # 同じ分内 - 既存ローソク足を更新
-              last_candle[:high] = [last_candle[:high], tick[:close]].max
-              last_candle[:low] = [last_candle[:low], tick[:close]].min
-              last_candle[:close] = tick[:close]  # 最新価格で更新
+              old_close = last_candle[:close]
+              last_candle[:high] = [last_candle[:high], current_price].max
+              last_candle[:low] = [last_candle[:low], current_price].min
+              last_candle[:close] = current_price  # 最新価格で更新
               last_candle[:volume] = (last_candle[:volume] || 0) + (tick[:volume] || 1)
+              
+              # 価格変化のデバッグ
+              if @debug_mode && (old_close - current_price).abs > 0.00001
+                puts "ローソク足更新: #{current_minute.strftime('%H:%M')} 価格変化 #{old_close.round(5)} → #{current_price.round(5)}"
+              end
             end
           end
           
-          # 古いデータの削除
-          if @candles.length > 500
+          # 古いデータの削除（メモリ効率のため）
+          if @candles.length > 1000  # 500から1000に増加
             @candles.shift
           end
           
           # インジケーターを更新
+          old_fast_ma = @indicator_calculator.value(:fast_ma)
+          old_slow_ma = @indicator_calculator.value(:slow_ma)
+          
           @indicator_calculator.set_candles(@candles)
           
-          # デバッグ: MA計算完了後の値確認
+          # MA計算結果の確認
           if @debug_mode && @candles.length >= 14
-            fast_ma = @indicator_calculator.value(:fast_ma)
-            slow_ma = @indicator_calculator.value(:slow_ma)
+            new_fast_ma = @indicator_calculator.value(:fast_ma)
+            new_slow_ma = @indicator_calculator.value(:slow_ma)
             
-            # 異常値のチェック
-            if fast_ma && (fast_ma - tick[:close]).abs < 0.00001
-              puts "!!! MA異常: FastMA=#{fast_ma} が価格=#{tick[:close]}と同じです"
+            # MA値の変化をチェック
+            if old_fast_ma && new_fast_ma && (old_fast_ma - new_fast_ma).abs > 0.000001
+              puts "FastMA変化: #{old_fast_ma.round(5)} → #{new_fast_ma.round(5)}"
             end
             
-            if @candles.length % 60 == 0  # 60分ごとに詳細出力
+            if old_slow_ma && new_slow_ma && (old_slow_ma - new_slow_ma).abs > 0.000001
+              puts "SlowMA変化: #{old_slow_ma.round(5)} → #{new_slow_ma.round(5)}"
+            end
+            
+            # 60分ごとに詳細出力
+            if @candles.length % 60 == 0
               puts "=== MA状態確認 (#{@candles.length}本目) ==="
-              puts "現在価格: #{tick[:close]}"
-              puts "FastMA: #{fast_ma&.round(5)}"
-              puts "SlowMA: #{slow_ma&.round(5)}"
-              puts "最新5本の終値: #{@candles.last(5).map { |c| c[:close].round(5) }}"
+              puts "現在価格: #{current_price.round(5)}"
+              puts "FastMA: #{new_fast_ma&.round(5)}"
+              puts "SlowMA: #{new_slow_ma&.round(5)}"
+              
+              # 最新の価格データをチェック
+              recent_prices = @candles.last(14).map { |c| c[:close].round(5) }
+              puts "最新14本の終値: #{recent_prices}"
+              puts "価格変動範囲: #{recent_prices.min} - #{recent_prices.max}"
               puts "======================================="
             end
           end

@@ -3,13 +3,20 @@ module MT4Backtester
     class IndicatorCalculator
       attr_reader :indicators, :candles
       
-      def initialize
+      def initialize(debug_mode = false)
         @indicators = {}
         @candles = []
+        @debug_mode = debug_mode
       end
 
       def add_indicator(name, indicator)
         @indicators[name] = indicator
+        
+        # デバッグモードを伝播
+        if indicator.respond_to?(:instance_variable_set)
+          indicator.instance_variable_set(:@debug_mode, @debug_mode)
+        end
+        
         calculate(@indicators[name]) if @candles.any?
         @indicators[name]
       end
@@ -22,24 +29,51 @@ module MT4Backtester
       
       # 移動平均を追加
       def add_ma(name, period, price_type = :close)
-        # 既存のMovingAverageクラスの代わりにMT4CompatibleMAを使用
-        # @indicators[name] = MovingAverage.new(period, price_type)
-        
         # 新しいMT4互換クラスを使用
-        @indicators[name] = MT4CompatibleMA.new(period, :sma, price_type)
-        calculate(@indicators[name]) if @candles.any?
-        @indicators[name]
+        ma_indicator = MT4CompatibleMA.new(period, :sma, price_type)
+        
+        # デバッグモードを設定
+        ma_indicator.instance_variable_set(:@debug_mode, @debug_mode) if @debug_mode
+        
+        @indicators[name] = ma_indicator
+        calculate(ma_indicator) if @candles.any?
+        ma_indicator
       end
       
       # 指標を計算
       def calculate(indicator)
+        old_data_size = indicator.respond_to?(:data) ? indicator.data.size : 0
+        
         indicator.calculate(@candles)
+        
+        # デバッグ情報
+        if @debug_mode && indicator.respond_to?(:data)
+          new_data_size = indicator.data.size
+          if new_data_size != old_data_size
+            puts "インジケーター計算更新: データ数 #{old_data_size} → #{new_data_size}"
+            
+            if indicator.respond_to?(:debug_info)
+              puts "  詳細: #{indicator.debug_info}"
+            end
+          end
+        end
       end
       
       # すべての指標を計算
       def calculate_all
-        @indicators.each_value do |indicator|
+        return if @candles.empty?
+        
+        if @debug_mode
+          puts "全インジケーター計算開始: ローソク足数=#{@candles.size}"
+        end
+        
+        @indicators.each do |name, indicator|
           calculate(indicator)
+          
+          if @debug_mode && indicator.respond_to?(:current_value)
+            current_val = indicator.current_value
+            puts "  #{name}: #{current_val ? current_val.round(5) : 'nil'}"
+          end
         end
       end
 
@@ -62,6 +96,7 @@ module MT4Backtester
         @indicators[name].value(steps_back)
       end
 
+      # 残りのメソッドは変更なし
       def ma_crossover_check(fast_ma_name, slow_ma_name)
         fast_ma = @indicators[fast_ma_name]
         slow_ma = @indicators[slow_ma_name]
@@ -87,46 +122,6 @@ module MT4Backtester
           return :sell
         end
       end
-
-      # 移動平均クロスオーバーの確認（Trevian方式）
-      def ma_crossover_check_org(fast_ma_name, slow_ma_name)
-        fast_ma = @indicators[fast_ma_name]
-        slow_ma = @indicators[slow_ma_name]
-        
-        return :none if fast_ma.nil? || slow_ma.nil?
-
-        # 現在の値を取得
-        current_fast = fast_ma.current_value
-        current_slow = slow_ma.current_value
-        
-        # 前回の値を取得
-        prev_fast = fast_ma.previous_value
-        prev_slow = slow_ma.previous_value
-
-        # デバッグ出力
-        if @debug_mode
-          puts "現在 FastMA: #{current_fast}, SlowMA: #{current_slow}"
-          puts "前回 FastMA: #{prev_fast}, SlowMA: #{prev_slow}"
-        end
-
-        # MT4と同様に、必ず買いか売りのどちらかを返すように修正
-        if current_fast >= current_slow && prev_fast >= prev_slow
-          return :buy
-        else
-          # それ以外はすべて売り
-          return :sell
-        end
-        # クロスオーバー検出（原MQL4コードに忠実に）
-        #if current_fast > current_slow && prev_fast > prev_slow
-        #  return :buy
-        #elsif current_fast < current_slow && prev_fast < prev_slow
-        #  return :sell
-        #else
-        #  return :none  # 明確なシグナルがない場合
-        #end
-
-      end
-
     end
   end
 end

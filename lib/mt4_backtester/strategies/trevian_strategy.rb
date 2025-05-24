@@ -251,116 +251,96 @@ module MT4Backtester
         end
       end
 
-      def record_indicator_data_safely(tick, index)
-        return unless @core_logic && @core_logic.indicator_calculator
-        
-        begin
-          # MA計算に必要な最小データ数をチェック
-          candles = @core_logic.instance_variable_get(:@candles)
-          return unless candles && candles.size >= 14
-          
-          # MA インジケーターを取得
-          fast_ma_indicator = @core_logic.indicator_calculator.indicators[:fast_ma]
-          slow_ma_indicator = @core_logic.indicator_calculator.indicators[:slow_ma]
-          
-          return unless fast_ma_indicator && slow_ma_indicator
-          
-          # MA値を取得
-          fast_ma = fast_ma_indicator.current_value
-          slow_ma = slow_ma_indicator.current_value
-          
-          # 値の検証
-          current_price = tick[:close].to_f
-          
-          # MA値の妥当性チェック（より厳格に）
-          if fast_ma && fast_ma.is_a?(Numeric) && fast_ma.finite?
-            # 価格との差が異常に大きくないかチェック（10%以内）
-            price_diff_percent = ((fast_ma - current_price).abs / current_price) * 100
-            
-            if price_diff_percent > 10.0
-              puts "異常なFastMA値を検出: MA=#{fast_ma.round(5)}, 価格=#{current_price.round(5)}, 差=#{price_diff_percent.round(2)}%" if @debug_mode
-              fast_ma = nil  # 異常値は記録しない
-            end
-          else
-            fast_ma = nil
-          end
-          
-          if slow_ma && slow_ma.is_a?(Numeric) && slow_ma.finite?
-            # 価格との差が異常に大きくないかチェック（10%以内）
-            price_diff_percent = ((slow_ma - current_price).abs / current_price) * 100
-            
-            if price_diff_percent > 10.0
-              puts "異常なSlowMA値を検出: MA=#{slow_ma.round(5)}, 価格=#{current_price.round(5)}, 差=#{price_diff_percent.round(2)}%" if @debug_mode
-              slow_ma = nil  # 異常値は記録しない
-            end
-          else
-            slow_ma = nil
-          end
-          
-          # 前回値との比較チェック（同じ値が連続しすぎないように）
-          if @indicators_data[:ma_fast].any? && fast_ma
-            last_fast_ma = @indicators_data[:ma_fast].last[:value]
-            if (fast_ma - last_fast_ma).abs < 0.000001
-              @consecutive_same_fast_ma ||= 0
-              @consecutive_same_fast_ma += 1
-              
-              if @consecutive_same_fast_ma > 100 && @debug_mode
-                puts "警告: FastMAが#{@consecutive_same_fast_ma}回連続で同じ値です (#{fast_ma.round(5)})"
-                
-                # 原因調査のため、最新のローソク足データを確認
-                recent_candles = candles.last(10)
-                puts "最新10本の終値: #{recent_candles.map { |c| c[:close].round(5) }}"
-              end
-            else
-              @consecutive_same_fast_ma = 0
-            end
-          end
-          
-          if @indicators_data[:ma_slow].any? && slow_ma
-            last_slow_ma = @indicators_data[:ma_slow].last[:value]
-            if (slow_ma - last_slow_ma).abs < 0.000001
-              @consecutive_same_slow_ma ||= 0
-              @consecutive_same_slow_ma += 1
-              
-              if @consecutive_same_slow_ma > 100 && @debug_mode
-                puts "警告: SlowMAが#{@consecutive_same_slow_ma}回連続で同じ値です (#{slow_ma.round(5)})"
-              end
-            else
-              @consecutive_same_slow_ma = 0
-            end
-          end
-          
-          # 有効な値のみ記録
-          if fast_ma && fast_ma.is_a?(Numeric) && fast_ma.finite?
-            @indicators_data[:ma_fast] << {
-              time: tick[:time],
-              value: fast_ma.round(5)
-            }
-          end
-          
-          if slow_ma && slow_ma.is_a?(Numeric) && slow_ma.finite?
-            @indicators_data[:ma_slow] << {
-              time: tick[:time],
-              value: slow_ma.round(5)
-            }
-          end
-          
-          # デバッグ情報（必要に応じて）
-          if @debug_mode && (fast_ma || slow_ma)
-            # 価格変化がある場合のみ出力
-            if (@indicators_data[:ma_fast].size % 60 == 0) || 
-              (@indicators_data[:ma_fast].size > 1 && 
-                (@indicators_data[:ma_fast].last[:value] - @indicators_data[:ma_fast][-2][:value]).abs > 0.00001)
-              
-              puts "MA記録: #{tick[:time].strftime('%H:%M')} 価格=#{current_price.round(5)} FastMA=#{fast_ma&.round(5)} SlowMA=#{slow_ma&.round(5)}"
-            end
-          end
-          
-        rescue => e
-          puts "MA記録エラー: #{e.message}" if @debug_mode
-          puts e.backtrace.first(3) if @debug_mode
-        end
+def record_indicator_data_safely(tick, index)
+  return unless @core_logic && @core_logic.indicator_calculator
+  
+  begin
+    # MA計算に必要な最小データ数をチェック
+    candles = @core_logic.instance_variable_get(:@candles)
+    return unless candles && candles.size >= 14
+    
+    # 強制的にMA計算を更新
+    @core_logic.indicator_calculator.calculate_all
+    
+    # MA インジケーターを取得
+    fast_ma_indicator = @core_logic.indicator_calculator.indicators[:fast_ma]
+    slow_ma_indicator = @core_logic.indicator_calculator.indicators[:slow_ma]
+    
+    return unless fast_ma_indicator && slow_ma_indicator
+    
+    # MA値を取得
+    fast_ma = fast_ma_indicator.current_value
+    slow_ma = slow_ma_indicator.current_value
+    
+    # デバッグ出力を追加
+    puts "MA記録チェック: 時刻=#{tick[:time].strftime('%H:%M')}"
+    puts "  ローソク足数=#{candles.size}, FastMA=#{fast_ma ? fast_ma.round(5) : 'nil'}, SlowMA=#{slow_ma ? slow_ma.round(5) : 'nil'}"
+    puts "  現在価格=#{tick[:close].round(5)}"
+    
+    # 前回値との比較（変化があるかチェック）
+    if @indicators_data[:ma_fast].any?
+      last_fast_ma = @indicators_data[:ma_fast].last[:value]
+      if fast_ma && (fast_ma - last_fast_ma).abs > 0.000001
+        puts "  FastMA変化: #{last_fast_ma.round(5)} → #{fast_ma.round(5)}"
+      else
+        puts "  FastMA変化なし: #{fast_ma ? fast_ma.round(5) : 'nil'}"
       end
+    end
+    
+    # 値の検証
+    current_price = tick[:close].to_f
+    
+    # MA値の妥当性チェック（より厳格に）
+    if fast_ma && fast_ma.is_a?(Numeric) && fast_ma.finite?
+      # 価格との差が異常に大きくないかチェック（10%以内）
+      price_diff_percent = ((fast_ma - current_price).abs / current_price) * 100
+      
+      if price_diff_percent > 10.0
+        puts "異常なFastMA値を検出: MA=#{fast_ma.round(5)}, 価格=#{current_price.round(5)}, 差=#{price_diff_percent.round(2)}%"
+        fast_ma = nil  # 異常値は記録しない
+      end
+    else
+      fast_ma = nil
+    end
+    
+    if slow_ma && slow_ma.is_a?(Numeric) && slow_ma.finite?
+      # 価格との差が異常に大きくないかチェック（10%以内）
+      price_diff_percent = ((slow_ma - current_price).abs / current_price) * 100
+      
+      if price_diff_percent > 10.0
+        puts "異常なSlowMA値を検出: MA=#{slow_ma.round(5)}, 価格=#{current_price.round(5)}, 差=#{price_diff_percent.round(2)}%"
+        slow_ma = nil  # 異常値は記録しない
+      end
+    else
+      slow_ma = nil
+    end
+    
+    # 有効な値のみ記録（必ず記録するよう修正）
+    if fast_ma && fast_ma.is_a?(Numeric) && fast_ma.finite?
+      @indicators_data[:ma_fast] << {
+        time: tick[:time],
+        value: fast_ma.round(5)
+      }
+      puts "  FastMA記録: #{fast_ma.round(5)}"
+    else
+      puts "  FastMA記録スキップ: #{fast_ma}"
+    end
+    
+    if slow_ma && slow_ma.is_a?(Numeric) && slow_ma.finite?
+      @indicators_data[:ma_slow] << {
+        time: tick[:time],
+        value: slow_ma.round(5)
+      }
+      puts "  SlowMA記録: #{slow_ma.round(5)}"
+    else
+      puts "  SlowMA記録スキップ: #{slow_ma}"
+    end
+    
+  rescue => e
+    puts "MA記録エラー: #{e.message}"
+    puts e.backtrace.first(3)
+  end
+end
 
       def record_indicator_data(tick, index)
         # インジケーターが初期化されているか確認

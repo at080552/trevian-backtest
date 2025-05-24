@@ -52,31 +52,36 @@ module MT4Backtester
       # 特定のインデックスの移動平均値を取得（MT4のiMA関数と同様）
       # @param index [Integer] 取得したいバーのインデックス（0が最新）
       # @return [Float, nil] 移動平均値
-
       def current_value
         return nil if @data.empty?
         
-        # 最新の有効な値を取得
-        @data.reverse.each do |value|
-          return value if value && value.is_a?(Numeric) && value.finite?
+        # 最新の有効な値を取得（後ろから5個まで確認）
+        @data.reverse.first(5).each do |value|
+          if value && value.is_a?(Numeric) && value.finite? && value > 0
+            return value
+          end
         end
         
         nil
       end
 
-      # 前回の値を取得
       def previous_value(steps_back = 1)
         return nil if @data.length <= steps_back
         
         # 指定されたステップ数だけ前の有効な値を取得
-        index = @data.length - 1 - steps_back
-        return nil if index < 0
+        start_index = [@data.length - 1 - steps_back, 0].max
+        end_index = [@data.length - 1, start_index].max
         
-        value = @data[index]
-        return value if value && value.is_a?(Numeric) && value.finite?
+        (start_index..end_index).reverse_each do |i|
+          value = @data[i]
+          if value && value.is_a?(Numeric) && value.finite? && value > 0
+            return value
+          end
+        end
         
         nil
       end
+
 
       # 特定のインデックスの移動平均値を取得（MT4のiMA関数と同様）
       def value(index = 0)

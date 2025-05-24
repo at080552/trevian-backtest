@@ -22,10 +22,21 @@ module MT4Backtester
       end
       
       # ローソク足データを設定
-      def set_candles(candles)
-        @candles = candles
-        calculate_all
-      end
+def set_candles(candles)
+  @candles = candles
+  puts "ローソク足設定: #{candles.size}本" if @debug_mode
+  
+  # 強制的に全て再計算
+  calculate_all
+  
+  # 計算結果の検証
+  if @debug_mode
+    @indicators.each do |name, indicator|
+      current_val = indicator.respond_to?(:current_value) ? indicator.current_value : nil
+      puts "  #{name}: #{current_val ? current_val.round(5) : 'nil'}"
+    end
+  end
+end
       
       # 移動平均を追加
       def add_ma(name, period, price_type = :close)
@@ -60,22 +71,24 @@ module MT4Backtester
       end
       
       # すべての指標を計算
-      def calculate_all
-        return if @candles.empty?
-        
-        if @debug_mode
-          puts "全インジケーター計算開始: ローソク足数=#{@candles.size}"
-        end
-        
-        @indicators.each do |name, indicator|
-          calculate(indicator)
-          
-          if @debug_mode && indicator.respond_to?(:current_value)
-            current_val = indicator.current_value
-            puts "  #{name}: #{current_val ? current_val.round(5) : 'nil'}"
-          end
-        end
-      end
+def calculate_all
+  return if @candles.empty?
+  
+  puts "全インジケーター再計算開始: ローソク足数=#{@candles.size}" if @debug_mode
+  
+  @indicators.each do |name, indicator|
+    old_data_size = indicator.respond_to?(:data) ? indicator.data.size : 0
+    
+    # 強制的に再計算
+    indicator.calculate(@candles)
+    
+    if @debug_mode
+      new_data_size = indicator.respond_to?(:data) ? indicator.data.size : 0
+      current_val = indicator.respond_to?(:current_value) ? indicator.current_value : nil
+      puts "  #{name}更新: データ数 #{old_data_size} → #{new_data_size}, 現在値: #{current_val ? current_val.round(5) : 'nil'}"
+    end
+  end
+end
 
       def value(name)
         return nil unless @indicators[name]

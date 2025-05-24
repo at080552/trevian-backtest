@@ -31,15 +31,39 @@ module MT4Backtester
         process_indicator_data
       end
 
-      def process_indicator_data
-        # データが無い場合は何もしない
-        return if @indicator_data.empty?
+def process_indicator_data
+  # データが無い場合は何もしない
+  return if @indicator_data.empty?
+  
+  puts "=== インジケーターデータ処理 ==="
+  
+  # 各インジケーターのデータを時間でソート
+  @indicator_data.each do |indicator_name, data_points|
+    if data_points && !data_points.empty?
+      puts "#{indicator_name}: #{data_points.size}個のデータポイント"
+      
+      # データの変化を確認
+      if data_points.size > 1
+        first_value = data_points.first[:value]
+        last_value = data_points.last[:value]
+        puts "  値の範囲: #{first_value} → #{last_value}"
         
-        # 各インジケーターのデータを時間でソート
-        @indicator_data.each do |indicator_name, data_points|
-          @indicator_data[indicator_name] = data_points.sort_by { |point| point[:time] }
+        # 全て同じ値かチェック
+        unique_values = data_points.map { |p| p[:value] }.uniq
+        if unique_values.size == 1
+          puts "  警告: 全て同じ値です: #{unique_values.first}"
+        else
+          puts "  ユニーク値数: #{unique_values.size}"
+          puts "  最小値: #{unique_values.min}, 最大値: #{unique_values.max}"
         end
       end
+      
+      @indicator_data[indicator_name] = data_points.sort_by { |point| point[:time] }
+    else
+      puts "#{indicator_name}: データなし"
+    end
+  end
+end
       
       private
       
